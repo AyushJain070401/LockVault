@@ -1,0 +1,105 @@
+{
+  "name": "lockvault",
+  "version": "1.0.0",
+  "description": "Production-grade authentication toolkit for Node.js — JWT, sessions, TOTP/2FA, OAuth, multi-database support",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./adapters/postgres": {
+      "types": "./dist/adapters/postgres/index.d.ts",
+      "import": "./dist/adapters/postgres/index.mjs",
+      "require": "./dist/adapters/postgres/index.js"
+    },
+    "./adapters/mongodb": {
+      "types": "./dist/adapters/mongodb/index.d.ts",
+      "import": "./dist/adapters/mongodb/index.mjs",
+      "require": "./dist/adapters/mongodb/index.js"
+    },
+    "./adapters/redis": {
+      "types": "./dist/adapters/redis/index.d.ts",
+      "import": "./dist/adapters/redis/index.mjs",
+      "require": "./dist/adapters/redis/index.js"
+    },
+    "./middleware/express": {
+      "types": "./dist/middleware/express.d.ts",
+      "import": "./dist/middleware/express.mjs",
+      "require": "./dist/middleware/express.js"
+    },
+    "./middleware/fastify": {
+      "types": "./dist/middleware/fastify.d.ts",
+      "import": "./dist/middleware/fastify.mjs",
+      "require": "./dist/middleware/fastify.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/ --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "auth",
+    "authentication",
+    "jwt",
+    "session",
+    "totp",
+    "2fa",
+    "oauth",
+    "express",
+    "fastify",
+    "nestjs",
+    "postgres",
+    "mongodb",
+    "redis",
+    "security",
+    "token",
+    "refresh-token"
+  ],
+  "author": "LockVault Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lockvault/lockvault.git"
+  },
+  "homepage": "https://github.com/lockvault/lockvault#readme",
+  "bugs": {
+    "url": "https://github.com/lockvault/lockvault/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "peerDependencies": {
+    "pg": ">=8.0.0",
+    "mongodb": ">=6.0.0",
+    "ioredis": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "pg": { "optional": true },
+    "mongodb": { "optional": true },
+    "ioredis": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.0",
+    "tsup": "^8.0.0",
+    "vitest": "^1.2.0",
+    "@vitest/coverage-v8": "^1.2.0",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0"
+  }
+}
