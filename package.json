@@ -69,15 +69,15 @@
     "token",
     "refresh-token"
   ],
-  "author": "LockVault Contributors",
+  "author": "Ayush Jain",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lockvault/lockvault.git"
+    "url": "git+https://github.com/AyushJain070401/LockVault.git"
   },
-  "homepage": "https://github.com/lockvault/lockvault#readme",
+  "homepage": "https://github.com/AyushJain070401/LockVault#readme",
   "bugs": {
-    "url": "https://github.com/lockvault/lockvault/issues"
+    "url": "https://github.com/AyushJain070401/LockVault/issues"
   },
   "engines": {
     "node": ">=18.0.0"
