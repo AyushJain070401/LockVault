@@ -1,6 +1,6 @@
 {
   "name": "lockvault",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Production-grade authentication toolkit for Node.js — JWT, sessions, TOTP/2FA, OAuth, multi-database support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
