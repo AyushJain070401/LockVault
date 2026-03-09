@@ -1,7 +1,7 @@
 import { loginMinimal, loginCorporate, loginVibrant } from './login.js';
 import { forgotPasswordClean, forgotPasswordSecure, forgotPasswordFriendly } from './forgot-password.js';
 import { alertStandard, alertUrgent, alertSubtle } from './alert.js';
-import type { EmailTemplateCategory, TemplateDefinition, TemplateSource } from '../types.js';
+import type { EmailTemplateCategory, TemplateDefinition } from '../types.js';
 
 type TemplateMap = Record<string, string>;
 

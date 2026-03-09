@@ -1,10 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
+
 import type {
   EmailConfig, SendEmailOptions, SendTemplateEmailOptions, SendCustomTemplateOptions,
   SendNamedTemplateOptions, SendBulkOptions, EmailResult, BulkEmailResult, TemplateVars,
   TemplateDefinition, TemplateSource, LoginEmailVars, ForgotPasswordEmailVars, AlertEmailVars,
-  EmailTemplateCategory,
 } from './types.js';
 import { renderTemplate, htmlToText } from './engine.js';
 import {
@@ -54,7 +54,9 @@ export function createEmailManager(config: EmailConfig): EmailManager {
 
   async function getTransporter(): Promise<any> {
     if (transporter) return transporter;
-    try { nodemailer = await import('nodemailer'); } catch {
+    // Use a variable so TypeScript doesn't try to resolve the module at compile time
+    const moduleName = 'nodemailer';
+    try { nodemailer = await import(/* webpackIgnore: true */ moduleName); } catch {
       throw new Error('LockVault Email: `nodemailer` is required but not installed.\nInstall it with:\n  npm install nodemailer\n  npm install -D @types/nodemailer');
     }
     const { smtp } = config;

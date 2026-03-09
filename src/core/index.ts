@@ -1,4 +1,4 @@
-import { LockVaultConfig, TokenPair, Session, DeviceInfo, TOTPSetupResult, OAuthProviderConfig, OAuthProviderPreset, OAuthUserProfile, OAuthTokenResponse, DatabaseAdapter, LockVaultPlugin, LockVaultHooks } from '../types/index.js';
+import { LockVaultConfig, TokenPair, Session, DeviceInfo, TOTPSetupResult, OAuthProviderConfig, OAuthProviderPreset, OAuthUserProfile, OAuthTokenResponse, DatabaseAdapter, LockVaultHooks } from '../types/index.js';
 import { createJWTManager, JWTManager } from '../jwt/index.js';
 import { createSessionManager, SessionManager } from '../session/index.js';
 import { createTOTPManager, TOTPManager } from '../totp/index.js';

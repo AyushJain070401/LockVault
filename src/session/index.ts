@@ -1,4 +1,4 @@
-import { Session, DeviceInfo, LockVaultConfig, DatabaseAdapter, LockVaultHooks, AuthErrorCode } from '../types/index.js';
+import { Session, DeviceInfo, LockVaultConfig, LockVaultHooks, AuthErrorCode } from '../types/index.js';
 import { generateUUID } from '../utils/crypto.js';
 import { SessionError } from '../utils/errors.js';
 
