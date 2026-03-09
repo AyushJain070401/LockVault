@@ -2,6 +2,7 @@
  * LockVault — Database Adapter Examples
  *
  * Shows how to use PostgreSQL, MongoDB, and Redis adapters.
+ * All adapters use factory functions — no `new` keyword needed.
  */
 
 // ════════════════════════════════════════════════════════════════════════
@@ -9,8 +10,8 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { Pool } from 'pg';
-import { LockVault } from 'lockvault';
-import { PostgresAdapter } from 'lockvault/adapters/postgres';
+import { createLockVault } from 'lockvault';
+import { createPostgresAdapter } from 'lockvault/adapters/postgres';
 
 async function withPostgres() {
   const pool = new Pool({
@@ -22,11 +23,11 @@ async function withPostgres() {
     max: 20,
   });
 
-  const adapter = new PostgresAdapter(pool, {
+  const adapter = createPostgresAdapter(pool, {
     tablePrefix: 'auth_',  // Tables: auth_sessions, auth_refresh_families, etc.
   });
 
-  const auth = new LockVault({
+  const auth = createLockVault({
     jwt: {
       accessTokenSecret: process.env.JWT_SECRET!,
       refreshTokenSecret: process.env.JWT_REFRESH_SECRET!,
@@ -49,18 +50,18 @@ async function withPostgres() {
 // ════════════════════════════════════════════════════════════════════════
 
 import { MongoClient } from 'mongodb';
-import { MongoDBAdapter } from 'lockvault/adapters/mongodb';
+import { createMongoDBAdapter } from 'lockvault/adapters/mongodb';
 
 async function withMongoDB() {
   const client = new MongoClient('mongodb://localhost:27017');
   await client.connect();
   const db = client.db('myapp');
 
-  const adapter = new MongoDBAdapter(db, {
+  const adapter = createMongoDBAdapter(db, {
     collectionPrefix: 'auth_',  // Collections: auth_sessions, auth_refresh_families, etc.
   });
 
-  const auth = new LockVault({
+  const auth = createLockVault({
     jwt: {
       accessTokenSecret: process.env.JWT_SECRET!,
     },
@@ -81,7 +82,7 @@ async function withMongoDB() {
 // ════════════════════════════════════════════════════════════════════════
 
 import Redis from 'ioredis';
-import { RedisAdapter } from 'lockvault/adapters/redis';
+import { createRedisAdapter } from 'lockvault/adapters/redis';
 
 async function withRedis() {
   const redis = new Redis({
@@ -90,11 +91,11 @@ async function withRedis() {
     password: process.env.REDIS_PASSWORD,
   });
 
-  const adapter = new RedisAdapter(redis, {
+  const adapter = createRedisAdapter(redis, {
     prefix: 'myapp:auth:',  // Keys: myapp:auth:session:xxx, etc.
   });
 
-  const auth = new LockVault({
+  const auth = createLockVault({
     jwt: {
       accessTokenSecret: process.env.JWT_SECRET!,
       accessTokenTTL: 300,    // 5 min access tokens
@@ -113,46 +114,49 @@ async function withRedis() {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Custom Adapter
+// Custom Adapter (function-based)
 // ════════════════════════════════════════════════════════════════════════
 
 import type { DatabaseAdapter, Session, OAuthLink } from 'lockvault';
 
-class MyCustomAdapter implements DatabaseAdapter {
-  // Implement all required methods...
-  async createSession(session: Session): Promise<Session> {
-    // Your custom database logic
-    return session;
-  }
+function createMyCustomAdapter(): DatabaseAdapter {
+  // Your internal state (database connections, caches, etc.)
+  const sessions = new Map<string, Session>();
 
-  async getSession(sessionId: string): Promise<Session | null> {
-    // Your custom database logic
-    return null;
-  }
+  return {
+    async createSession(session) {
+      sessions.set(session.id, session);
+      return session;
+    },
 
-  // ... implement all other DatabaseAdapter methods
-  // See the MemoryAdapter source code for a complete reference implementation
+    async getSession(sessionId) {
+      return sessions.get(sessionId) ?? null;
+    },
 
-  async getSessionsByUser(_userId: string): Promise<Session[]> { return []; }
-  async updateSession(_id: string, _updates: Partial<Session>): Promise<Session | null> { return null; }
-  async deleteSession(_id: string): Promise<boolean> { return false; }
-  async deleteSessionsByUser(_userId: string): Promise<number> { return 0; }
-  async deleteExpiredSessions(): Promise<number> { return 0; }
-  async storeRefreshTokenFamily(_f: string, _u: string, _g: number): Promise<void> {}
-  async getRefreshTokenFamily(_f: string) { return null; }
-  async revokeRefreshTokenFamily(_f: string): Promise<void> {}
-  async incrementRefreshTokenGeneration(_f: string): Promise<number> { return 0; }
-  async addToRevocationList(_jti: string, _exp: Date): Promise<void> {}
-  async isRevoked(_jti: string): Promise<boolean> { return false; }
-  async cleanupRevocationList(): Promise<number> { return 0; }
-  async storeTOTPSecret(_u: string, _s: string): Promise<void> {}
-  async getTOTPSecret(_u: string): Promise<string | null> { return null; }
-  async removeTOTPSecret(_u: string): Promise<void> {}
-  async storeBackupCodes(_u: string, _c: string[]): Promise<void> {}
-  async getBackupCodes(_u: string): Promise<string[]> { return []; }
-  async consumeBackupCode(_u: string, _c: string): Promise<boolean> { return false; }
-  async linkOAuthAccount(_u: string, _l: OAuthLink): Promise<void> {}
-  async getOAuthLinks(_u: string): Promise<OAuthLink[]> { return []; }
-  async findUserByOAuth(_p: string, _pid: string): Promise<string | null> { return null; }
-  async unlinkOAuthAccount(_u: string, _p: string): Promise<boolean> { return false; }
+    // ... implement all other DatabaseAdapter methods
+    // See the createMemoryAdapter source for a complete reference
+
+    async getSessionsByUser(_userId) { return []; },
+    async updateSession(_id, _updates) { return null; },
+    async deleteSession(_id) { return false; },
+    async deleteSessionsByUser(_userId) { return 0; },
+    async deleteExpiredSessions() { return 0; },
+    async storeRefreshTokenFamily(_f, _u, _g) {},
+    async getRefreshTokenFamily(_f) { return null; },
+    async revokeRefreshTokenFamily(_f) {},
+    async incrementRefreshTokenGeneration(_f) { return 0; },
+    async addToRevocationList(_jti, _exp) {},
+    async isRevoked(_jti) { return false; },
+    async cleanupRevocationList() { return 0; },
+    async storeTOTPSecret(_u, _s) {},
+    async getTOTPSecret(_u) { return null; },
+    async removeTOTPSecret(_u) {},
+    async storeBackupCodes(_u, _c) {},
+    async getBackupCodes(_u) { return []; },
+    async consumeBackupCode(_u, _c) { return false; },
+    async linkOAuthAccount(_u, _l) {},
+    async getOAuthLinks(_u) { return []; },
+    async findUserByOAuth(_p, _pid) { return null; },
+    async unlinkOAuthAccount(_u, _p) { return false; },
+  };
 }

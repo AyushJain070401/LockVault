@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { LockVault } from '../../src/core/index.js';
-import { MemoryAdapter } from '../../src/adapters/memory/index.js';
-import { JWTManager } from '../../src/jwt/index.js';
+import { createLockVault } from '../../src/core/index.js';
+import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
+import { createJWTManager } from '../../src/jwt/index.js';
 import {
   TokenInvalidError,
   TokenExpiredError,
@@ -15,7 +15,7 @@ describe('Security Edge Cases', () => {
   let auth: LockVault;
 
   beforeEach(async () => {
-    auth = new LockVault({
+    auth = createLockVault({
       jwt: {
         accessTokenSecret: 'super-secret-key-that-is-at-least-32-chars!',
         refreshTokenSecret: 'another-secret-key-at-least-32-characters!',
@@ -27,7 +27,7 @@ describe('Security Edge Cases', () => {
         reuseDetection: true,
         familyRevocationOnReuse: true,
       },
-      adapter: new MemoryAdapter(),
+      adapter: createMemoryAdapter(),
     });
     await auth.initialize();
   });
@@ -203,33 +203,33 @@ describe('Security Edge Cases', () => {
 
   describe('Configuration Validation', () => {
     it('should reject missing access token secret for HS256', () => {
-      expect(() => new LockVault({
+      expect(() => createLockVault({
         jwt: { accessTokenSecret: '' },
-        adapter: new MemoryAdapter(),
+        adapter: createMemoryAdapter(),
       })).toThrow();
     });
 
     it('should reject RS256 without keys', () => {
-      expect(() => new LockVault({
+      expect(() => createLockVault({
         jwt: { accessTokenSecret: 'x', algorithm: 'RS256' },
-        adapter: new MemoryAdapter(),
+        adapter: createMemoryAdapter(),
       })).toThrow();
     });
 
     it('should reject secrets shorter than 32 characters', () => {
-      expect(() => new LockVault({
+      expect(() => createLockVault({
         jwt: { accessTokenSecret: 'too-short' },
-        adapter: new MemoryAdapter(),
+        adapter: createMemoryAdapter(),
       })).toThrow(/at least 32 characters/);
     });
 
     it('should reject short refreshTokenSecret', () => {
-      expect(() => new LockVault({
+      expect(() => createLockVault({
         jwt: {
           accessTokenSecret: 'a-valid-secret-that-is-at-least-32-chars!!',
           refreshTokenSecret: 'too-short',
         },
-        adapter: new MemoryAdapter(),
+        adapter: createMemoryAdapter(),
       })).toThrow(/at least 32 characters/);
     });
   });
@@ -268,13 +268,13 @@ describe('Security Edge Cases', () => {
   describe('Issuer and Audience Validation', () => {
     it('should reject tokens with wrong issuer when issuer is configured', async () => {
       // Create auth instance with issuer configured
-      const strictAuth = new LockVault({
+      const strictAuth = createLockVault({
         jwt: {
           accessTokenSecret: 'super-secret-key-that-is-at-least-32-chars!',
           issuer: 'my-app',
           audience: 'my-api',
         },
-        adapter: new MemoryAdapter(),
+        adapter: createMemoryAdapter(),
       });
       await strictAuth.initialize();
 

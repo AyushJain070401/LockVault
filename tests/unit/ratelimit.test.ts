@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { RateLimiter, RateLimitError } from '../../src/ratelimit/index.js';
+import { createRateLimiter, RateLimitError } from '../../src/ratelimit/index.js';
 
 describe('RateLimiter', () => {
   let limiter: RateLimiter;
@@ -9,7 +9,7 @@ describe('RateLimiter', () => {
   });
 
   it('should allow requests under the limit', async () => {
-    limiter = new RateLimiter({ windowMs: 60_000, maxAttempts: 3 });
+    limiter = createRateLimiter({ windowMs: 60_000, maxAttempts: 3 });
 
     await limiter.consume('user-1');
     await limiter.consume('user-1');
@@ -20,7 +20,7 @@ describe('RateLimiter', () => {
   });
 
   it('should track different identifiers independently', async () => {
-    limiter = new RateLimiter({ windowMs: 60_000, maxAttempts: 1 });
+    limiter = createRateLimiter({ windowMs: 60_000, maxAttempts: 1 });
 
     await limiter.consume('user-1');
     await limiter.consume('user-2'); // Different user should be fine
@@ -29,7 +29,7 @@ describe('RateLimiter', () => {
   });
 
   it('should report correct remaining attempts', async () => {
-    limiter = new RateLimiter({ windowMs: 60_000, maxAttempts: 5 });
+    limiter = createRateLimiter({ windowMs: 60_000, maxAttempts: 5 });
 
     expect(limiter.remaining('user-1')).toBe(5);
     await limiter.consume('user-1');
@@ -39,7 +39,7 @@ describe('RateLimiter', () => {
   });
 
   it('should reset an identifier', async () => {
-    limiter = new RateLimiter({ windowMs: 60_000, maxAttempts: 1 });
+    limiter = createRateLimiter({ windowMs: 60_000, maxAttempts: 1 });
 
     await limiter.consume('user-1');
     await expect(limiter.consume('user-1')).rejects.toThrow(RateLimitError);
@@ -49,7 +49,7 @@ describe('RateLimiter', () => {
   });
 
   it('should include retryAfterMs in error', async () => {
-    limiter = new RateLimiter({ windowMs: 60_000, maxAttempts: 1 });
+    limiter = createRateLimiter({ windowMs: 60_000, maxAttempts: 1 });
 
     await limiter.consume('user-1');
     try {
@@ -65,7 +65,7 @@ describe('RateLimiter', () => {
 
   it('should call onRateLimit callback when triggered', async () => {
     const onRateLimit = vi.fn();
-    limiter = new RateLimiter({ windowMs: 60_000, maxAttempts: 1, onRateLimit });
+    limiter = createRateLimiter({ windowMs: 60_000, maxAttempts: 1, onRateLimit });
 
     await limiter.consume('user-1');
     await expect(limiter.consume('user-1')).rejects.toThrow(RateLimitError);
@@ -74,7 +74,7 @@ describe('RateLimiter', () => {
   });
 
   it('should clean up expired entries', async () => {
-    limiter = new RateLimiter({ windowMs: 1, maxAttempts: 1 });
+    limiter = createRateLimiter({ windowMs: 1, maxAttempts: 1 });
 
     await limiter.consume('user-1');
     await expect(limiter.consume('user-1')).rejects.toThrow(RateLimitError);

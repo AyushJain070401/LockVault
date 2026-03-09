@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
-import { JWTManager } from '../../src/jwt/index.js';
-import { MemoryAdapter } from '../../src/adapters/memory/index.js';
-import { MemoryKeyValueStore } from '../../src/store/index.js';
+import { createJWTManager } from '../../src/jwt/index.js';
+import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
+import { createMemoryKeyValueStore } from '../../src/store/index.js';
 import { safeCompare } from '../../src/utils/crypto.js';
 import type { LockVaultConfig } from '../../src/types/index.js';
 
@@ -23,18 +23,18 @@ describe('ES256 (ECDSA P-256) JWT', () => {
       publicKey: publicKey as string,
       accessTokenTTL: 900,
     },
-    adapter: new MemoryAdapter(),
+    adapter: createMemoryAdapter(),
   };
 
   it('should sign and verify tokens with ES256', async () => {
-    const jwt = new JWTManager(config);
+    const jwt = createJWTManager(config);
     const pair = await jwt.createTokenPair('user-es256');
     const payload = await jwt.verifyAccessToken(pair.accessToken);
     expect(payload.sub).toBe('user-es256');
   });
 
   it('should reject tampered ES256 tokens', async () => {
-    const jwt = new JWTManager(config);
+    const jwt = createJWTManager(config);
     const pair = await jwt.createTokenPair('user-es256');
     const tampered = pair.accessToken.slice(0, -5) + 'XXXXX';
     await expect(jwt.verifyAccessToken(tampered)).rejects.toThrow();
@@ -57,11 +57,11 @@ describe('EdDSA (Ed25519) JWT', () => {
       publicKey: publicKey as string,
       accessTokenTTL: 900,
     },
-    adapter: new MemoryAdapter(),
+    adapter: createMemoryAdapter(),
   };
 
   it('should sign and verify tokens with EdDSA', async () => {
-    const jwt = new JWTManager(config);
+    const jwt = createJWTManager(config);
     const pair = await jwt.createTokenPair('user-eddsa');
     const payload = await jwt.verifyAccessToken(pair.accessToken);
     expect(payload.sub).toBe('user-eddsa');
@@ -69,14 +69,14 @@ describe('EdDSA (Ed25519) JWT', () => {
   });
 
   it('should reject tampered EdDSA tokens', async () => {
-    const jwt = new JWTManager(config);
+    const jwt = createJWTManager(config);
     const pair = await jwt.createTokenPair('user-eddsa');
     const tampered = pair.accessToken.slice(0, -5) + 'XXXXX';
     await expect(jwt.verifyAccessToken(tampered)).rejects.toThrow();
   });
 
   it('should do full refresh token rotation with EdDSA', async () => {
-    const jwt = new JWTManager(config);
+    const jwt = createJWTManager(config);
     const original = await jwt.createTokenPair('user-eddsa');
     const refreshed = await jwt.refreshTokens(original.refreshToken);
     expect(refreshed.accessToken).not.toBe(original.accessToken);
@@ -86,7 +86,7 @@ describe('EdDSA (Ed25519) JWT', () => {
   });
 
   it('should reject HS256 tokens when EdDSA is configured', async () => {
-    const jwt = new JWTManager(config);
+    const jwt = createJWTManager(config);
 
     // Craft a fake HS256 token header
     const fakeHeader = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
@@ -107,38 +107,38 @@ describe('MemoryKeyValueStore', () => {
   });
 
   it('should set and get values', async () => {
-    store = new MemoryKeyValueStore();
+    store = createMemoryKeyValueStore();
     await store.set('key1', 'value1');
     expect(await store.get('key1')).toBe('value1');
   });
 
   it('should return null for missing keys', async () => {
-    store = new MemoryKeyValueStore();
+    store = createMemoryKeyValueStore();
     expect(await store.get('nonexistent')).toBeNull();
   });
 
   it('should delete values', async () => {
-    store = new MemoryKeyValueStore();
+    store = createMemoryKeyValueStore();
     await store.set('key1', 'value1');
     expect(await store.delete('key1')).toBe(true);
     expect(await store.get('key1')).toBeNull();
   });
 
   it('should expire values after TTL', async () => {
-    store = new MemoryKeyValueStore();
+    store = createMemoryKeyValueStore();
     await store.set('key1', 'value1', 1); // 1ms TTL
     await new Promise(r => setTimeout(r, 10));
     expect(await store.get('key1')).toBeNull();
   });
 
   it('should keep values within TTL', async () => {
-    store = new MemoryKeyValueStore();
+    store = createMemoryKeyValueStore();
     await store.set('key1', 'value1', 60_000); // 60s TTL
     expect(await store.get('key1')).toBe('value1');
   });
 
   it('should evict when over max entries', async () => {
-    store = new MemoryKeyValueStore({ maxEntries: 3 });
+    store = createMemoryKeyValueStore({ maxEntries: 3 });
     await store.set('a', '1');
     await store.set('b', '2');
     await store.set('c', '3');

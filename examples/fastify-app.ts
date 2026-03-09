@@ -3,14 +3,14 @@
  */
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
-import { LockVault, MemoryAdapter } from 'lockvault';
+import { createLockVault, createMemoryAdapter } from 'lockvault';
 import {
   lockVaultPlugin,
   fastifyAuthorize,
   setFastifyAuthCookies,
 } from 'lockvault/middleware/fastify';
 
-const auth = new LockVault({
+const auth = createLockVault({
   jwt: {
     accessTokenSecret: process.env.JWT_SECRET!,
     refreshTokenSecret: process.env.JWT_REFRESH_SECRET!,
@@ -20,7 +20,7 @@ const auth = new LockVault({
   },
   session: { enabled: true, maxPerUser: 10 },
   refreshToken: { rotation: true, reuseDetection: true },
-  adapter: new MemoryAdapter(),
+  adapter: createMemoryAdapter(),
 });
 
 const app = Fastify({ logger: true });

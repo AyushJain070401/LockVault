@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { TOTPManager } from '../../src/totp/index.js';
-import { MemoryAdapter } from '../../src/adapters/memory/index.js';
+import { createTOTPManager } from '../../src/totp/index.js';
+import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
 import { TOTPError } from '../../src/utils/errors.js';
 
 describe('TOTPManager', () => {
   let totp: TOTPManager;
-  let adapter: MemoryAdapter;
+  let adapter: createMemoryAdapter;
 
   beforeEach(() => {
-    adapter = new MemoryAdapter();
-    totp = new TOTPManager({ issuer: 'TestApp', period: 30, window: 1 }, adapter);
+    adapter = createMemoryAdapter();
+    totp = createTOTPManager({ issuer: 'TestApp', period: 30, window: 1 }, adapter);
   });
 
   describe('setup', () => {

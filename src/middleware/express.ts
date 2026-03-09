@@ -1,6 +1,6 @@
 import type { TokenPayload, Session, CookieOptions } from '../types/index.js';
-import { JWTManager } from '../jwt/index.js';
-import { SessionManager } from '../session/index.js';
+import type { JWTManager } from '../jwt/index.js';
+import type { SessionManager } from '../session/index.js';
 import { LockVaultError } from '../utils/errors.js';
 import { safeCompare } from '../utils/crypto.js';
 

@@ -4,17 +4,17 @@
  * Demonstrates Google and GitHub OAuth with account linking.
  */
 import express from 'express';
-import { LockVault, MemoryAdapter } from 'lockvault';
+import { createLockVault, createMemoryAdapter } from 'lockvault';
 import { setAuthCookies } from 'lockvault/middleware/express';
 
-const auth = new LockVault({
+const auth = createLockVault({
   jwt: {
     accessTokenSecret: process.env.JWT_SECRET!,
     refreshTokenSecret: process.env.JWT_REFRESH_SECRET!,
     accessTokenTTL: 900,
     refreshTokenTTL: 604800,
   },
-  adapter: new MemoryAdapter(),
+  adapter: createMemoryAdapter(),
 });
 
 // ─── Register OAuth Providers ────────────────────────────────────────────
