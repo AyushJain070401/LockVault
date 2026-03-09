@@ -1,9 +1,19 @@
 {
   "name": "lockvault",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "description": "Production-grade authentication toolkit for Node.js — JWT, sessions, TOTP/2FA, OAuth, multi-database support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "adapters/postgres": ["dist/adapters/postgres/index.d.ts"],
+      "adapters/mongodb": ["dist/adapters/mongodb/index.d.ts"],
+      "adapters/redis": ["dist/adapters/redis/index.d.ts"],
+      "middleware/express": ["dist/middleware/express.d.ts"],
+      "middleware/fastify": ["dist/middleware/fastify.d.ts"],
+      "email": ["dist/email/index.d.ts"]
+    }
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
