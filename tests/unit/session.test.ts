@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { SessionManager } from '../../src/session/index.js';
-import { MemoryAdapter } from '../../src/adapters/memory/index.js';
+import { createSessionManager } from '../../src/session/index.js';
+import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
 import { SessionError } from '../../src/utils/errors.js';
 import type { LockVaultConfig } from '../../src/types/index.js';
 
@@ -17,7 +17,7 @@ function createConfig(overrides?: Partial<LockVaultConfig['session']>): LockVaul
       inactivityTimeout: 3600,
       ...overrides,
     },
-    adapter: new MemoryAdapter(),
+    adapter: createMemoryAdapter(),
   };
 }
 
@@ -27,7 +27,7 @@ describe('SessionManager', () => {
 
   beforeEach(() => {
     config = createConfig();
-    manager = new SessionManager(config);
+    manager = createSessionManager(config);
   });
 
   describe('createSession', () => {
@@ -49,7 +49,7 @@ describe('SessionManager', () => {
 
     it('should enforce max sessions per user', async () => {
       const limitConfig = createConfig({ maxPerUser: 2 });
-      const limitManager = new SessionManager(limitConfig);
+      const limitManager = createSessionManager(limitConfig);
 
       const s1 = await limitManager.createSession('user-1', 'f1');
       const s2 = await limitManager.createSession('user-1', 'f2');
@@ -135,7 +135,7 @@ describe('SessionManager', () => {
 
   describe('cleanup', () => {
     it('should remove expired sessions', async () => {
-      const adapter = config.adapter as MemoryAdapter;
+      const adapter = config.adapter as createMemoryAdapter;
       // Create a session that's already expired
       await adapter.createSession({
         id: 'expired-1',

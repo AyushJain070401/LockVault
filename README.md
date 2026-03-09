@@ -11,11 +11,11 @@ npm install lockvault
 Most auth setups need you to wire together 5+ packages (jsonwebtoken, express-session, speakeasy, passport, etc.) and get the security details right yourself. LockVault gives you all of it in one import, with safe defaults already configured.
 
 ```typescript
-import { LockVault, MemoryAdapter } from 'lockvault';
+import { createLockVault, createMemoryAdapter } from 'lockvault';
 
-const auth = new LockVault({
+const auth = createLockVault({
   jwt: { accessTokenSecret: process.env.JWT_SECRET! },
-  adapter: new MemoryAdapter(), // swap for Postgres/MongoDB/Redis in production
+  adapter: createMemoryAdapter(), // swap for Postgres/MongoDB/Redis in production
 });
 
 await auth.initialize();
@@ -53,6 +53,7 @@ That's the basic flow. Everything below goes deeper.
 - [Rate Limiting](#rate-limiting)
 - [Key-Value Store](#key-value-store)
 - [Plugin System](#plugin-system)
+- [Email / SMTP (Optional)](#email--smtp-optional)
 - [Utility Functions](#utility-functions)
 - [Error Handling](#error-handling)
 - [Security Checklist](#security-checklist)
@@ -67,12 +68,13 @@ That's the basic flow. Everything below goes deeper.
 npm install lockvault
 ```
 
-LockVault has **zero runtime dependencies**. It uses only Node.js built-in `crypto`. You'll also install a database driver depending on which adapter you use:
+LockVault has **zero runtime dependencies**. It uses only Node.js built-in `crypto`. Database drivers and email are optional — install only what you need:
 
 ```bash
-npm install pg        # if using PostgreSQL
-npm install mongodb   # if using MongoDB
-npm install ioredis   # if using Redis
+npm install pg          # if using PostgreSQL
+npm install mongodb     # if using MongoDB
+npm install ioredis     # if using Redis
+npm install nodemailer  # if using the email module (optional)
 ```
 
 Requires **Node.js 18+**.
@@ -81,7 +83,7 @@ Requires **Node.js 18+**.
 
 ## Core Concepts
 
-LockVault has four main pieces. You can use them all together through the `LockVault` class, or import any piece individually.
+LockVault has four main pieces. You can use them all together through the `createLockVault()` factory, or import any piece individually.
 
 | Module | What it does |
 |--------|-------------|
@@ -89,8 +91,9 @@ LockVault has four main pieces. You can use them all together through the `LockV
 | **SessionManager** | Tracks login sessions per user and device |
 | **TOTPManager** | Generates and verifies 2FA codes (Google Authenticator, etc.) |
 | **OAuthManager** | Handles Google, GitHub, Facebook, Apple, and Microsoft login flows |
+| **EmailManager** | Optional SMTP email with themed templates and general-purpose mailing |
 
-All four are connected through a **DatabaseAdapter** — an interface that tells LockVault where to store sessions, token families, TOTP secrets, and OAuth links. You pick the database; LockVault handles the logic.
+All four are connected through a **DatabaseAdapter** — an interface that tells LockVault where to store sessions, token families, TOTP secrets, and OAuth links. You pick the database; LockVault handles the logic. The **EmailManager** is a standalone module that works independently — it doesn't require a database adapter and can be used even without the core `createLockVault()` setup.
 
 ---
 
@@ -99,7 +102,7 @@ All four are connected through a **DatabaseAdapter** — an interface that tells
 Here's every option available. Only `jwt.accessTokenSecret` and `adapter` are required for HS256 setups.
 
 ```typescript
-import { LockVault, MemoryAdapter } from 'lockvault';
+import { createLockVault, createMemoryAdapter } from 'lockvault';
 import type { LockVaultConfig } from 'lockvault';
 
 const config: LockVaultConfig = {
@@ -154,13 +157,13 @@ const config: LockVaultConfig = {
   kvStore: myRedisKvStore,           // optional — for TOTP replay protection in multi-instance
 
   // ── Database Adapter (required) ──────────────────────────────────────
-  adapter: new MemoryAdapter(),
+  adapter: createMemoryAdapter(),
 
   // ── Plugins ──────────────────────────────────────────────────────────
   plugins: [],
 };
 
-const auth = new LockVault(config);
+const auth = createLockVault(config);
 await auth.initialize();
 ```
 
@@ -190,14 +193,14 @@ const { privateKey, publicKey } = generateKeyPairSync('ed25519', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
 });
 
-const auth = new LockVault({
+const auth = createLockVault({
   jwt: {
     algorithm: 'EdDSA',
     accessTokenSecret: '',       // not used for asymmetric algorithms
     privateKey,                  // signs tokens
     publicKey,                   // verifies tokens (safe to share)
   },
-  adapter: new MemoryAdapter(),
+  adapter: createMemoryAdapter(),
 });
 ```
 
@@ -210,9 +213,9 @@ const { privateKey, publicKey } = generateKeyPairSync('ec', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
 });
 
-const auth = new LockVault({
+const auth = createLockVault({
   jwt: { algorithm: 'ES256', accessTokenSecret: '', privateKey, publicKey },
-  adapter: new MemoryAdapter(),
+  adapter: createMemoryAdapter(),
 });
 ```
 
@@ -427,12 +430,12 @@ auth.registerOAuthProvider('gitlab', {
 
 ```typescript
 import { Pool } from 'pg';
-import { PostgresAdapter } from 'lockvault/adapters/postgres';
+import { createPostgresAdapter } from 'lockvault/adapters/postgres';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PostgresAdapter(pool, { tablePrefix: 'auth_' });
+const adapter = createPostgresAdapter(pool, { tablePrefix: 'auth_' });
 
-const auth = new LockVault({ jwt: { ... }, adapter });
+const auth = createLockVault({ jwt: { ... }, adapter });
 await auth.initialize(); // creates tables and indexes automatically
 ```
 
@@ -440,29 +443,29 @@ await auth.initialize(); // creates tables and indexes automatically
 
 ```typescript
 import { MongoClient } from 'mongodb';
-import { MongoDBAdapter } from 'lockvault/adapters/mongodb';
+import { createMongoDBAdapter } from 'lockvault/adapters/mongodb';
 
 const client = new MongoClient(process.env.MONGO_URL!);
 const db = client.db('myapp');
-const adapter = new MongoDBAdapter(db, { collectionPrefix: 'auth_' });
+const adapter = createMongoDBAdapter(db, { collectionPrefix: 'auth_' });
 ```
 
 ### Redis
 
 ```typescript
 import Redis from 'ioredis';
-import { RedisAdapter } from 'lockvault/adapters/redis';
+import { createRedisAdapter } from 'lockvault/adapters/redis';
 
 const redis = new Redis(process.env.REDIS_URL);
-const adapter = new RedisAdapter(redis, { prefix: 'auth:' });
+const adapter = createRedisAdapter(redis, { prefix: 'auth:' });
 // Sessions and revoked tokens auto-expire via Redis TTL
 ```
 
 ### In-Memory (for development and testing)
 
 ```typescript
-import { MemoryAdapter } from 'lockvault';
-const adapter = new MemoryAdapter();
+import { createMemoryAdapter } from 'lockvault';
+const adapter = createMemoryAdapter();
 ```
 
 ### Custom Adapter
@@ -472,11 +475,13 @@ Implement the `DatabaseAdapter` interface. The `MemoryAdapter` source at `src/ad
 ```typescript
 import type { DatabaseAdapter } from 'lockvault';
 
-class MyAdapter implements DatabaseAdapter {
-  async createSession(session) { /* ... */ }
-  async getSession(id) { /* ... */ }
-  async getSessionsByUser(userId) { /* ... */ }
-  // ... see DatabaseAdapter interface for all required methods
+function createMyAdapter(): DatabaseAdapter {
+  return {
+    async createSession(session) { /* ... */ return session; },
+    async getSession(id) { /* ... */ return null; },
+    async getSessionsByUser(userId) { /* ... */ return []; },
+    // ... see DatabaseAdapter interface for all required methods
+  };
 }
 ```
 
@@ -540,9 +545,9 @@ app.get('/api/admin', {
 LockVault includes a sliding-window rate limiter. It's already used internally for TOTP, but you can use it for login endpoints, API routes, or anything else:
 
 ```typescript
-import { RateLimiter, RateLimitError } from 'lockvault';
+import { createRateLimiter, RateLimitError } from 'lockvault';
 
-const loginLimiter = new RateLimiter({
+const loginLimiter = createRateLimiter({
   windowMs: 60_000,      // 1 minute window
   maxAttempts: 5,         // max 5 attempts per window
 });
@@ -574,20 +579,20 @@ LockVault uses a `KeyValueStore` interface for ephemeral data (OAuth state, TOTP
 import type { KeyValueStore } from 'lockvault';
 
 // Example: Redis-backed store
-class RedisKeyValueStore implements KeyValueStore {
-  constructor(private redis: Redis) {}
-
-  async get(key: string) { return this.redis.get(key); }
-  async set(key: string, value: string, ttlMs?: number) {
-    if (ttlMs) await this.redis.set(key, value, 'PX', ttlMs);
-    else await this.redis.set(key, value);
-  }
-  async delete(key: string) { return (await this.redis.del(key)) > 0; }
+function createRedisKeyValueStore(redis: Redis): KeyValueStore {
+  return {
+    async get(key) { return redis.get(key); },
+    async set(key, value, ttlMs?) {
+      if (ttlMs) await redis.set(key, value, 'PX', ttlMs);
+      else await redis.set(key, value);
+    },
+    async delete(key) { return (await redis.del(key)) > 0; },
+  };
 }
 
-const kvStore = new RedisKeyValueStore(redis);
+const kvStore = createRedisKeyValueStore(redis);
 
-const auth = new LockVault({
+const auth = createLockVault({
   jwt: { ... },
   adapter: postgresAdapter,
   kvStore,                        // TOTP replay protection across instances
@@ -619,7 +624,7 @@ const auditPlugin: LockVaultPlugin = {
   },
 };
 
-const auth = new LockVault({ ...config, plugins: [auditPlugin] });
+const auth = createLockVault({ ...config, plugins: [auditPlugin] });
 ```
 
 ### Available Hooks
@@ -635,6 +640,243 @@ const auth = new LockVault({ ...config, plugins: [auditPlugin] });
 | `onTokenRevoked` | When a token is revoked |
 | `onReuseDetected` | When refresh token reuse is detected |
 | `onError` | On any auth error |
+
+---
+
+## Email / SMTP (Optional)
+
+LockVault includes a full-featured email module with themed templates for auth flows **and** general-purpose mailing. Email is **entirely optional** — LockVault works perfectly without it. If you never import from `lockvault/email`, nodemailer is never loaded and there's zero impact on your bundle.
+
+**Install nodemailer only if you need email:**
+
+```bash
+npm install nodemailer
+npm install -D @types/nodemailer  # TypeScript users
+```
+
+### Quick Setup
+
+```typescript
+import { createEmailManager } from 'lockvault/email';
+
+const mailer = createEmailManager({
+  smtp: {
+    host: 'smtp.gmail.com',
+    port: 587,
+    auth: { user: 'you@gmail.com', pass: 'app-password' },
+    from: '"My App" <you@gmail.com>',
+  },
+  defaults: { appName: 'My App', supportUrl: 'https://myapp.com/support' },
+});
+```
+
+### General-Purpose Mailing
+
+Use LockVault as a normal mailer — plain text, HTML, attachments, CC/BCC, priority headers:
+
+```typescript
+// Plain text
+await mailer.sendMail({ to: 'user@example.com', subject: 'Hello', text: 'Just checking in.' });
+
+// HTML with attachments
+await mailer.sendMail({
+  to: ['alice@example.com', 'bob@example.com'],
+  subject: 'Monthly Report',
+  html: '<h1>Report</h1><p>See attachment.</p>',
+  attachments: [{ filename: 'report.pdf', path: './report.pdf' }],
+  priority: 'high',
+});
+
+// CC, BCC, custom from, headers
+await mailer.sendMail({
+  to: 'user@example.com',
+  cc: ['manager@example.com'],
+  from: '"Finance" <finance@myapp.com>',  // override default from
+  subject: 'Payment Confirmation',
+  html: '<p>Your payment of $299 has been received.</p>',
+  headers: { 'X-Transaction-ID': 'txn_abc' },
+});
+```
+
+### Inline Templates
+
+Pass HTML with `{{variable}}` interpolation — no registration needed:
+
+```typescript
+await mailer.sendCustom({
+  to: 'user@example.com',
+  subject: 'Order #{{orderId}} Confirmed',
+  html: `
+    <p>Hi {{name}}, your order #{{orderId}} is confirmed.</p>
+    {{#if trackingUrl}}<a href="{{trackingUrl}}">Track shipment</a>{{/if}}
+    {{#each items}}<p>• {{name}} — {{price}}</p>{{/each}}
+  `,
+  variables: {
+    name: 'Ayush',
+    orderId: 'ORD-123',
+    trackingUrl: 'https://track.example.com/ORD-123',
+    items: [{ name: 'Widget', price: '$29.99' }],
+  },
+});
+```
+
+The template engine supports `{{var}}`, `{{{rawVar}}}`, `{{#if var}}...{{/if}}`, `{{#unless var}}...{{/unless}}`, `{{#each items}}...{{/each}}`, and `{{nested.path}}` dot-notation.
+
+### Built-In Auth Themes
+
+9 production-ready email templates across 3 categories, each with 3 visual themes:
+
+| Category | Themes | Convenience Method |
+|---|---|---|
+| Login Notification | `minimal`, `corporate`, `vibrant` | `sendLoginNotification()` |
+| Forgot Password | `clean`, `secure`, `friendly` | `sendForgotPassword()` |
+| Security Alert | `standard`, `urgent`, `subtle` | `sendAlert()` |
+
+```typescript
+await mailer.sendForgotPassword('user@example.com', {
+  resetUrl: 'https://app.com/reset?token=abc',
+  expiresIn: '15 minutes',
+  theme: 'friendly',  // or 'clean', 'secure'
+});
+
+await mailer.sendLoginNotification('user@example.com', {
+  loginTime: new Date().toLocaleString(),
+  ipAddress: '192.168.1.42',
+  deviceInfo: 'Chrome on macOS',
+  theme: 'vibrant',
+});
+
+await mailer.sendAlert('admin@example.com', {
+  alertTitle: 'Failed Login Attempts',
+  alertMessage: '15 failed attempts from IP 10.0.0.1.',
+  severity: 'critical',
+  theme: 'urgent',
+});
+```
+
+### Named Templates
+
+Register templates once, send by name. Three source types — inline HTML, file-based, or a custom render function:
+
+```typescript
+// Inline HTML
+mailer.registerNamedTemplate('order-shipped', {
+  source: { type: 'html', content: '<p>Hi {{name}}, order #{{orderId}} shipped!</p>' },
+  defaultSubject: 'Order #{{orderId}} Shipped',
+});
+
+// From a file on disk
+mailer.registerNamedTemplate('welcome', {
+  source: { type: 'file', path: './templates/welcome.html' },
+  defaultSubject: 'Welcome to {{appName}}!',
+});
+
+// Custom render function (Handlebars, EJS, MJML, React Email, etc.)
+mailer.registerNamedTemplate('newsletter', {
+  source: { type: 'render', fn: (vars) => ejs.render(myTemplate, vars) },
+  defaultSubject: '{{appName}} Newsletter',
+});
+
+// Send by name
+await mailer.sendWithTemplate({
+  to: 'user@example.com',
+  template: 'order-shipped',
+  variables: { name: 'Ayush', orderId: 'ORD-789' },
+});
+```
+
+### Custom Categories and Themes
+
+Create your own template categories with multiple themes, or override built-in ones:
+
+```typescript
+mailer.registerCategory('invoice', 'simple');
+mailer.registerTemplate('invoice', 'simple', simpleInvoiceHtml);
+mailer.registerTemplate('invoice', 'detailed', detailedInvoiceHtml);
+mailer.setDefaultTheme('invoice', 'simple');
+
+// Override built-in templates if you want
+mailer.registerTemplate('login', 'minimal', myCustomLoginHtml);
+
+// Remove templates/categories you don't need
+mailer.removeTemplate('alert', 'subtle');
+mailer.removeCategory('invoice');
+```
+
+### Custom Rendering Engine
+
+Plug in any template engine globally — Handlebars, EJS, MJML, React Email, or anything else:
+
+```typescript
+import Handlebars from 'handlebars';
+
+const mailer = createEmailManager({
+  smtp: { /* ... */ },
+  customRenderer: (html, vars) => Handlebars.compile(html)(vars),
+});
+```
+
+### Bulk Sending
+
+Send the same template to many recipients with per-recipient variables and optional rate limiting:
+
+```typescript
+const result = await mailer.sendBulk({
+  subject: 'Your monthly summary',
+  html: '<p>Hi {{name}}, you had {{count}} logins.</p>',
+  recipients: [
+    { to: 'alice@example.com', variables: { name: 'Alice', count: 42 } },
+    { to: 'bob@example.com', variables: { name: 'Bob', count: 7 } },
+  ],
+  delayMs: 100, // 100ms between sends
+});
+// result = { total: 2, sent: 2, failed: 0, results: [...] }
+```
+
+### Preview and Development
+
+Render templates without sending — useful for dev servers and testing:
+
+```typescript
+// Preview a category+theme template
+const html = mailer.preview('login', 'vibrant', { userName: 'Test', loginTime: 'now' });
+
+// Preview a named template
+const html2 = await mailer.previewNamedTemplate('order-shipped', { name: 'Test', orderId: 'DEMO' });
+
+// Render inline template (no SMTP needed)
+const html3 = mailer.renderInline('<p>Hi {{name}}</p>', { name: 'Ayush' });
+
+// Verify SMTP connection
+const ok = await mailer.verify();  // true or false
+
+// List everything available
+mailer.listCategories();        // ['login', 'forgot-password', 'alert', ...]
+mailer.listThemes('login');     // ['minimal', 'corporate', 'vibrant']
+mailer.listNamedTemplates();    // ['order-shipped', 'welcome', ...]
+```
+
+### `createEmailManager()` API Reference
+
+| Method | Description |
+|--------|-------------|
+| `sendMail(options)` | Send raw email (plain text, HTML, attachments) |
+| `send(options)` | Alias for `sendMail()` |
+| `sendCustom(options)` | Send with inline HTML template + variables |
+| `sendWithTemplate(options)` | Send using a registered named template |
+| `sendTemplate(options)` | Send using a category + theme template |
+| `sendLoginNotification(to, vars)` | Login alert with themed template |
+| `sendForgotPassword(to, vars)` | Password reset with themed template |
+| `sendAlert(to, vars)` | Security alert with themed template |
+| `sendBulk(options)` | Batch send with per-recipient variables |
+| `registerNamedTemplate(name, def)` | Register a named template |
+| `registerTemplate(category, theme, html)` | Register/override a category template |
+| `registerCategory(name, defaultTheme?)` | Create a new category |
+| `preview(category, theme, vars)` | Render category template without sending |
+| `previewNamedTemplate(name, vars)` | Render named template without sending |
+| `renderInline(html, vars)` | Render inline template string |
+| `verify()` | Test SMTP connection |
+| `close()` | Close SMTP connection pool |
 
 ---
 
@@ -699,6 +941,7 @@ try {
 | `RATE_LIMITED` | 429 | Too many attempts — retry after the specified delay |
 | `OAUTH_ERROR` | 400 | OAuth flow failed |
 | `CONFIGURATION_ERROR` | 500 | Invalid config at startup |
+| `EMAIL_ERROR` | 500 | SMTP connection or email send failure |
 
 ---
 
@@ -721,7 +964,7 @@ These are the defaults, but verify your setup covers them:
 
 ## API Reference
 
-### `LockVault`
+### `createLockVault(config)`
 
 | Method | Returns | Description |
 |--------|---------|-------------|

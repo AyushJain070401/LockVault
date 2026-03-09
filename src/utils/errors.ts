@@ -90,3 +90,10 @@ export class ConfigurationError extends LockVaultError {
     this.name = 'ConfigurationError';
   }
 }
+
+export class EmailError extends LockVaultError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, AuthErrorCode.EMAIL_ERROR, 500, details);
+    this.name = 'EmailError';
+  }
+}

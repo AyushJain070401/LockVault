@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { LockVault } from '../../src/core/index.js';
-import { MemoryAdapter } from '../../src/adapters/memory/index.js';
+import { createLockVault } from '../../src/core/index.js';
+import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
 import type { LockVaultConfig, LockVaultPlugin } from '../../src/types/index.js';
 
 describe('LockVault Integration', () => {
   let auth: LockVault;
 
   beforeEach(async () => {
-    auth = new LockVault({
+    auth = createLockVault({
       jwt: {
         accessTokenSecret: 'integration-test-secret-32-chars-minimum!',
         refreshTokenSecret: 'integration-refresh-secret-32-chars-min!!',
@@ -24,7 +24,7 @@ describe('LockVault Integration', () => {
         reuseDetection: true,
         familyRevocationOnReuse: true,
       },
-      adapter: new MemoryAdapter(),
+      adapter: createMemoryAdapter(),
     });
     await auth.initialize();
   });
@@ -144,13 +144,13 @@ describe('LockVault Integration', () => {
         },
       };
 
-      const pluginAuth = new LockVault({
+      const pluginAuth = createLockVault({
         jwt: {
           accessTokenSecret: 'plugin-test-secret-32-chars-minimum!!',
           accessTokenTTL: 900,
           refreshTokenTTL: 604800,
         },
-        adapter: new MemoryAdapter(),
+        adapter: createMemoryAdapter(),
         plugins: [loggingPlugin],
       });
 
@@ -184,7 +184,7 @@ describe('LockVault Integration', () => {
 
   describe('Encrypted Refresh Tokens', () => {
     it('should encrypt and decrypt refresh tokens transparently', async () => {
-      const encAuth = new LockVault({
+      const encAuth = createLockVault({
         jwt: {
           accessTokenSecret: 'encrypted-test-secret-32-chars-min!!',
           accessTokenTTL: 900,
@@ -198,7 +198,7 @@ describe('LockVault Integration', () => {
             key: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2',
           },
         },
-        adapter: new MemoryAdapter(),
+        adapter: createMemoryAdapter(),
       });
 
       await encAuth.initialize();

@@ -1,18 +1,23 @@
 // ─── Core ────────────────────────────────────────────────────────────────
-export { LockVault } from './core/index.js';
+export { createLockVault } from './core/index.js';
+export type { LockVault } from './core/index.js';
 
 // ─── Modules ─────────────────────────────────────────────────────────────
-export { JWTManager } from './jwt/index.js';
-export { SessionManager } from './session/index.js';
-export { TOTPManager } from './totp/index.js';
-export { OAuthManager } from './oauth/index.js';
+export { createJWTManager } from './jwt/index.js';
+export type { JWTManager } from './jwt/index.js';
+export { createSessionManager } from './session/index.js';
+export type { SessionManager } from './session/index.js';
+export { createTOTPManager } from './totp/index.js';
+export type { TOTPManager } from './totp/index.js';
+export { createOAuthManager } from './oauth/index.js';
+export type { OAuthManager } from './oauth/index.js';
 
 // ─── Adapters ────────────────────────────────────────────────────────────
-export { MemoryAdapter } from './adapters/memory/index.js';
+export { createMemoryAdapter } from './adapters/memory/index.js';
 // Database-specific adapters are exported from sub-paths:
-//   import { PostgresAdapter } from 'lockvault/adapters/postgres';
-//   import { MongoDBAdapter }  from 'lockvault/adapters/mongodb';
-//   import { RedisAdapter }    from 'lockvault/adapters/redis';
+//   import { createPostgresAdapter } from 'lockvault/adapters/postgres';
+//   import { createMongoDBAdapter }  from 'lockvault/adapters/mongodb';
+//   import { createRedisAdapter }    from 'lockvault/adapters/redis';
 
 // ─── Middleware ───────────────────────────────────────────────────────────
 // Framework-specific middleware is exported from sub-paths:
@@ -21,59 +26,39 @@ export { MemoryAdapter } from './adapters/memory/index.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 export type {
-  Algorithm,
-  TokenPayload,
-  AccessTokenPayload,
-  RefreshTokenPayload,
-  TokenPair,
-  DecodedToken,
-  Session,
-  DeviceInfo,
-  AuthUser,
-  OAuthLink,
-  TOTPConfig,
-  TOTPSetupResult,
-  OAuthProviderConfig,
-  OAuthUserProfile,
-  OAuthTokenResponse,
-  OAuthProviderPreset,
-  DatabaseAdapter,
-  KeyValueStore,
-  LockVaultConfig,
-  CookieOptions,
-  RateLimitConfig,
-  LockVaultPlugin,
-  LockVaultHooks,
-  MiddlewareOptions,
+  Algorithm, TokenPayload, AccessTokenPayload, RefreshTokenPayload, TokenPair,
+  DecodedToken, Session, DeviceInfo, AuthUser, OAuthLink, TOTPConfig,
+  TOTPSetupResult, OAuthProviderConfig, OAuthUserProfile, OAuthTokenResponse,
+  OAuthProviderPreset, DatabaseAdapter, KeyValueStore, LockVaultConfig,
+  CookieOptions, RateLimitConfig, LockVaultPlugin, LockVaultHooks, MiddlewareOptions,
 } from './types/index.js';
-
 export { AuthErrorCode } from './types/index.js';
 
 // ─── Key-Value Store ─────────────────────────────────────────────────────
-export { MemoryKeyValueStore } from './store/index.js';
+export { createMemoryKeyValueStore } from './store/index.js';
 
 // ─── Errors ──────────────────────────────────────────────────────────────
 export {
-  LockVaultError,
-  TokenExpiredError,
-  TokenInvalidError,
-  TokenRevokedError,
-  RefreshTokenReuseError,
-  SessionError,
-  TOTPError,
-  OAuthError,
-  ConfigurationError,
+  LockVaultError, TokenExpiredError, TokenInvalidError, TokenRevokedError,
+  RefreshTokenReuseError, SessionError, TOTPError, OAuthError,
+  ConfigurationError, EmailError,
 } from './utils/errors.js';
 
 // ─── Rate Limiting ───────────────────────────────────────────────────────
-export { RateLimiter, RateLimitError } from './ratelimit/index.js';
-export type { RateLimiterConfig } from './ratelimit/index.js';
+export { createRateLimiter, RateLimitError } from './ratelimit/index.js';
+export type { RateLimiterConfig, RateLimiter } from './ratelimit/index.js';
+
+// ─── Email (optional — requires `nodemailer`) ───────────────────────────
+// Full-featured SMTP mailer with themed auth templates AND general-purpose mailing:
+//   import { createEmailManager } from 'lockvault/email';
+export type {
+  EmailConfig, SMTPConfig, SendEmailOptions, SendTemplateEmailOptions,
+  SendCustomTemplateOptions, SendNamedTemplateOptions, SendBulkOptions,
+  BulkEmailResult, EmailResult, TemplateDefinition, TemplateSource,
+  CustomRenderFn, LoginEmailVars, ForgotPasswordEmailVars, AlertEmailVars,
+  WelcomeEmailVars, VerificationEmailVars, MagicLinkEmailVars,
+  EmailTemplateCategory, LoginTheme, ForgotPasswordTheme, AlertTheme,
+} from './email/types.js';
 
 // ─── Utilities ───────────────────────────────────────────────────────────
-export {
-  hashPassword,
-  verifyPassword,
-  generateId,
-  generateUUID,
-  generateBackupCodes,
-} from './utils/crypto.js';
+export { hashPassword, verifyPassword, generateId, generateUUID, generateBackupCodes } from './utils/crypto.js';

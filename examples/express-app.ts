@@ -6,7 +6,7 @@
  */
 import express from 'express';
 import cookieParser from 'cookie-parser';
-import { LockVault, MemoryAdapter, hashPassword, verifyPassword } from 'lockvault';
+import { createLockVault, createMemoryAdapter, hashPassword, verifyPassword } from 'lockvault';
 import {
   authenticate,
   authorize,
@@ -17,7 +17,7 @@ import {
 
 // ─── Initialize LockVault ────────────────────────────────────────────────
 
-const auth = new LockVault({
+const auth = createLockVault({
   jwt: {
     accessTokenSecret: process.env.JWT_SECRET!,
     refreshTokenSecret: process.env.JWT_REFRESH_SECRET!,
@@ -38,7 +38,7 @@ const auth = new LockVault({
   totp: {
     issuer: 'MyApp',
   },
-  adapter: new MemoryAdapter(), // Replace with PostgresAdapter for production
+  adapter: createMemoryAdapter(), // Replace with PostgresAdapter for production
 });
 
 // ─── Express App ─────────────────────────────────────────────────────────

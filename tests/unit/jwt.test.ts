@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { JWTManager } from '../../src/jwt/index.js';
-import { MemoryAdapter } from '../../src/adapters/memory/index.js';
+import { createJWTManager } from '../../src/jwt/index.js';
+import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
 import { TokenExpiredError, TokenInvalidError, TokenRevokedError, RefreshTokenReuseError } from '../../src/utils/errors.js';
 import type { LockVaultConfig } from '../../src/types/index.js';
 
@@ -19,7 +19,7 @@ function createConfig(overrides: Partial<LockVaultConfig['jwt']> = {}): LockVaul
       reuseDetection: true,
       familyRevocationOnReuse: true,
     },
-    adapter: new MemoryAdapter(),
+    adapter: createMemoryAdapter(),
   };
 }
 
@@ -29,7 +29,7 @@ describe('JWTManager', () => {
 
   beforeEach(() => {
     config = createConfig();
-    jwt = new JWTManager(config);
+    jwt = createJWTManager(config);
   });
 
   describe('createTokenPair', () => {
@@ -81,7 +81,7 @@ describe('JWTManager', () => {
 
     it('should reject an expired token', async () => {
       const expiredConfig = createConfig({ accessTokenTTL: -1 });
-      const expiredJwt = new JWTManager(expiredConfig);
+      const expiredJwt = createJWTManager(expiredConfig);
       const pair = await expiredJwt.createTokenPair('user-123');
 
       await expect(expiredJwt.verifyAccessToken(pair.accessToken))
@@ -202,7 +202,7 @@ describe('JWTManager', () => {
   describe('plugin hooks', () => {
     it('should call beforeTokenCreate hook', async () => {
       const hook = vi.fn((claims) => ({ ...claims, injected: true }));
-      const hookJwt = new JWTManager(config, { beforeTokenCreate: hook });
+      const hookJwt = createJWTManager(config, { beforeTokenCreate: hook });
 
       const pair = await hookJwt.createTokenPair('user-123');
       const payload = await hookJwt.verifyAccessToken(pair.accessToken);
@@ -213,7 +213,7 @@ describe('JWTManager', () => {
 
     it('should call afterTokenCreate hook', async () => {
       const hook = vi.fn();
-      const hookJwt = new JWTManager(config, { afterTokenCreate: hook });
+      const hookJwt = createJWTManager(config, { afterTokenCreate: hook });
 
       await hookJwt.createTokenPair('user-123');
       expect(hook).toHaveBeenCalledTimes(1);

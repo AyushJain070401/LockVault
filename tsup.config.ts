@@ -8,6 +8,7 @@ export default defineConfig({
     'adapters/redis/index': 'src/adapters/redis/index.ts',
     'middleware/express': 'src/middleware/express.ts',
     'middleware/fastify': 'src/middleware/fastify.ts',
+    'email/index': 'src/email/index.ts',
   },
   format: ['cjs', 'esm'],
   dts: true,
@@ -15,5 +16,5 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   treeshake: true,
-  external: ['pg', 'mongodb', 'ioredis'],
+  external: ['pg', 'mongodb', 'ioredis', 'nodemailer'],
 });

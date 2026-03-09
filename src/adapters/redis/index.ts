@@ -8,65 +8,60 @@ const SAFE_PREFIX = /^[a-zA-Z_][a-zA-Z0-9_:]*$/;
  * Uses hash maps and sets for efficient storage. Session and token
  * expiration leverages Redis TTL for automatic cleanup.
  */
-export class RedisAdapter implements DatabaseAdapter {
-  private redis: RedisClient;
-  private prefix: string;
-
-  constructor(redis: RedisClient, options: { prefix?: string } = {}) {
+export function createRedisAdapter(redis: RedisClient, options: { prefix?: string } = {}): DatabaseAdapter {
+  {
     const prefix = options.prefix ?? 'lockvault:';
     if (!SAFE_PREFIX.test(prefix)) {
       throw new Error(`Invalid prefix "${prefix}": must match /^[a-zA-Z_][a-zA-Z0-9_:]*$/`);
     }
-    this.redis = redis;
-    this.prefix = prefix;
+
+  function key(...parts: string[]): string {
+    return `${prefix}${parts.join(':')}`;
   }
 
-  private key(...parts: string[]): string {
-    return `${this.prefix}${parts.join(':')}`;
-  }
-
+  const result: DatabaseAdapter = {
   // ─── Lifecycle ─────────────────────────────────────────────────────────
 
   async initialize(): Promise<void> { /* no-op */ }
 
   async close(): Promise<void> {
-    await this.redis.quit();
+    await redis.quit();
   }
 
   // ─── Sessions ───────────────────────────────────────────────────────────
 
   async createSession(session: Session): Promise<Session> {
-    const key = this.key('session', session.id);
+    const key = key('session', session.id);
     const ttl = Math.ceil((session.expiresAt.getTime() - Date.now()) / 1000);
-    await this.redis.set(key, JSON.stringify(session), 'EX', Math.max(ttl, 1));
-    await this.redis.sadd(this.key('user_sessions', session.userId), session.id);
+    await redis.set(key, JSON.stringify(session), 'EX', Math.max(ttl, 1));
+    await redis.sadd(key('user_sessions', session.userId), session.id);
     return session;
   }
 
   async getSession(sessionId: string): Promise<Session | null> {
-    const data = await this.redis.get(this.key('session', sessionId));
+    const data = await redis.get(key('session', sessionId));
     if (!data) return null;
-    return this.deserializeSession(data);
+    return deserializeSession(data);
   }
 
   async getSessionsByUser(userId: string): Promise<Session[]> {
-    const ids = await this.redis.smembers(this.key('user_sessions', userId));
+    const ids = await redis.smembers(key('user_sessions', userId));
     const sessions: Session[] = [];
     for (const id of ids) {
-      const s = await this.getSession(id);
+      const s = await result.getSession(id);
       if (s) sessions.push(s);
-      else await this.redis.srem(this.key('user_sessions', userId), id); // cleanup
+      else await redis.srem(key('user_sessions', userId), id); // cleanup
     }
     return sessions;
   }
 
   async updateSession(sessionId: string, updates: Partial<Session>): Promise<Session | null> {
-    const existing = await this.getSession(sessionId);
+    const existing = await result.getSession(sessionId);
     if (!existing) return null;
     const updated = { ...existing, ...updates };
     const ttl = Math.ceil((updated.expiresAt.getTime() - Date.now()) / 1000);
-    await this.redis.set(
-      this.key('session', sessionId),
+    await redis.set(
+      key('session', sessionId),
       JSON.stringify(updated),
       'EX', Math.max(ttl, 1),
     );
@@ -74,21 +69,21 @@ export class RedisAdapter implements DatabaseAdapter {
   }
 
   async deleteSession(sessionId: string): Promise<boolean> {
-    const session = await this.getSession(sessionId);
+    const session = await result.getSession(sessionId);
     if (!session) return false;
-    await this.redis.del(this.key('session', sessionId));
-    await this.redis.srem(this.key('user_sessions', session.userId), sessionId);
+    await redis.del(key('session', sessionId));
+    await redis.srem(key('user_sessions', session.userId), sessionId);
     return true;
   }
 
   async deleteSessionsByUser(userId: string): Promise<number> {
-    const ids = await this.redis.smembers(this.key('user_sessions', userId));
+    const ids = await redis.smembers(key('user_sessions', userId));
     let count = 0;
     for (const id of ids) {
-      await this.redis.del(this.key('session', id));
+      await redis.del(key('session', id));
       count++;
     }
-    await this.redis.del(this.key('user_sessions', userId));
+    await redis.del(key('user_sessions', userId));
     return count;
   }
 
@@ -100,13 +95,13 @@ export class RedisAdapter implements DatabaseAdapter {
   // ─── Refresh Token Families ─────────────────────────────────────────────
 
   async storeRefreshTokenFamily(family: string, userId: string, generation: number): Promise<void> {
-    await this.redis.hmset(this.key('family', family), {
+    await redis.hmset(key('family', family), {
       userId, generation: String(generation), revoked: 'false',
     });
   }
 
   async getRefreshTokenFamily(family: string): Promise<{ userId: string; generation: number; revoked: boolean } | null> {
-    const data = await this.redis.hgetall(this.key('family', family));
+    const data = await redis.hgetall(key('family', family));
     if (!data || !data.userId) return null;
     return {
       userId: data.userId,
@@ -116,22 +111,22 @@ export class RedisAdapter implements DatabaseAdapter {
   }
 
   async revokeRefreshTokenFamily(family: string): Promise<void> {
-    await this.redis.hset(this.key('family', family), 'revoked', 'true');
+    await redis.hset(key('family', family), 'revoked', 'true');
   }
 
   async incrementRefreshTokenGeneration(family: string): Promise<number> {
-    return this.redis.hincrby(this.key('family', family), 'generation', 1);
+    return redis.hincrby(key('family', family), 'generation', 1);
   }
 
   // ─── Revocation List ────────────────────────────────────────────────────
 
   async addToRevocationList(jti: string, expiresAt: Date): Promise<void> {
     const ttl = Math.ceil((expiresAt.getTime() - Date.now()) / 1000);
-    await this.redis.set(this.key('revoked', jti), '1', 'EX', Math.max(ttl, 1));
+    await redis.set(key('revoked', jti), '1', 'EX', Math.max(ttl, 1));
   }
 
   async isRevoked(jti: string): Promise<boolean> {
-    const result = await this.redis.exists(this.key('revoked', jti));
+    const result = await redis.exists(key('revoked', jti));
     return result === 1;
   }
 
@@ -143,52 +138,52 @@ export class RedisAdapter implements DatabaseAdapter {
   // ─── TOTP ──────────────────────────────────────────────────────────────
 
   async storeTOTPSecret(userId: string, secret: string): Promise<void> {
-    await this.redis.set(this.key('totp', userId), secret);
+    await redis.set(key('totp', userId), secret);
   }
 
   async getTOTPSecret(userId: string): Promise<string | null> {
-    return this.redis.get(this.key('totp', userId));
+    return redis.get(key('totp', userId));
   }
 
   async removeTOTPSecret(userId: string): Promise<void> {
-    await this.redis.del(this.key('totp', userId));
-    await this.redis.del(this.key('backup', userId));
+    await redis.del(key('totp', userId));
+    await redis.del(key('backup', userId));
   }
 
   async storeBackupCodes(userId: string, codes: string[]): Promise<void> {
-    const key = this.key('backup', userId);
-    await this.redis.del(key);
+    const key = key('backup', userId);
+    await redis.del(key);
     if (codes.length > 0) {
-      await this.redis.sadd(key, ...codes);
+      await redis.sadd(key, ...codes);
     }
   }
 
   async getBackupCodes(userId: string): Promise<string[]> {
-    return this.redis.smembers(this.key('backup', userId));
+    return redis.smembers(key('backup', userId));
   }
 
   async consumeBackupCode(userId: string, code: string): Promise<boolean> {
-    const result = await this.redis.srem(this.key('backup', userId), code.toUpperCase());
+    const result = await redis.srem(key('backup', userId), code.toUpperCase());
     return result > 0;
   }
 
   // ─── OAuth ─────────────────────────────────────────────────────────────
 
   async linkOAuthAccount(userId: string, link: OAuthLink): Promise<void> {
-    const key = this.key('oauth', userId, link.provider);
-    await this.redis.set(key, JSON.stringify(link));
-    await this.redis.set(
-      this.key('oauth_lookup', link.provider, link.providerUserId),
+    const key = key('oauth', userId, link.provider);
+    await redis.set(key, JSON.stringify(link));
+    await redis.set(
+      key('oauth_lookup', link.provider, link.providerUserId),
       userId,
     );
-    await this.redis.sadd(this.key('oauth_providers', userId), link.provider);
+    await redis.sadd(key('oauth_providers', userId), link.provider);
   }
 
   async getOAuthLinks(userId: string): Promise<OAuthLink[]> {
-    const providers = await this.redis.smembers(this.key('oauth_providers', userId));
+    const providers = await redis.smembers(key('oauth_providers', userId));
     const links: OAuthLink[] = [];
     for (const provider of providers) {
-      const data = await this.redis.get(this.key('oauth', userId, provider));
+      const data = await redis.get(key('oauth', userId, provider));
       if (data) {
         const parsed = JSON.parse(data);
         links.push({ ...parsed, linkedAt: new Date(parsed.linkedAt) });
@@ -198,22 +193,25 @@ export class RedisAdapter implements DatabaseAdapter {
   }
 
   async findUserByOAuth(provider: string, providerUserId: string): Promise<string | null> {
-    return this.redis.get(this.key('oauth_lookup', provider, providerUserId));
+    return redis.get(key('oauth_lookup', provider, providerUserId));
   }
 
   async unlinkOAuthAccount(userId: string, provider: string): Promise<boolean> {
-    const data = await this.redis.get(this.key('oauth', userId, provider));
+    const data = await redis.get(key('oauth', userId, provider));
     if (!data) return false;
     const link = JSON.parse(data) as OAuthLink;
-    await this.redis.del(this.key('oauth', userId, provider));
-    await this.redis.del(this.key('oauth_lookup', provider, link.providerUserId));
-    await this.redis.srem(this.key('oauth_providers', userId), provider);
+    await redis.del(key('oauth', userId, provider));
+    await redis.del(key('oauth_lookup', provider, link.providerUserId));
+    await redis.srem(key('oauth_providers', userId), provider);
     return true;
   }
 
+  };
+  return result;
+
   // ─── Helpers ────────────────────────────────────────────────────────────
 
-  private deserializeSession(data: string): Session {
+  function deserializeSession(data: string): Session {
     const parsed = JSON.parse(data);
     return {
       ...parsed,
@@ -222,7 +220,6 @@ export class RedisAdapter implements DatabaseAdapter {
       lastActiveAt: new Date(parsed.lastActiveAt),
     };
   }
-}
 
 // Minimal type interface for ioredis compatibility
 interface RedisClient {

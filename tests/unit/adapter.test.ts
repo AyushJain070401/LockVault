@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MemoryAdapter } from '../../src/adapters/memory/index.js';
+import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
 import type { Session } from '../../src/types/index.js';
 
-describe('MemoryAdapter', () => {
-  let adapter: MemoryAdapter;
+describe('createMemoryAdapter', () => {
+  let adapter: createMemoryAdapter;
 
   beforeEach(() => {
-    adapter = new MemoryAdapter();
+    adapter = createMemoryAdapter();
   });
 
   const makeSession = (overrides: Partial<Session> = {}): Session => ({
