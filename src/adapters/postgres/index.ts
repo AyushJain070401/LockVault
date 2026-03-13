@@ -5,7 +5,13 @@ const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 // Minimal type for pg.Pool compatibility — avoids hard dependency on @types/pg
 interface PgPool {
   query(text: string, values?: unknown[]): Promise<{ rows: PgRow[]; rowCount: number | null }>;
+  connect(): Promise<PgClient>;
   end(): Promise<void>;
+}
+
+interface PgClient {
+  query(text: string, values?: unknown[]): Promise<{ rows: PgRow[]; rowCount: number | null }>;
+  release(): void;
 }
 
 type PgRow = Record<string, unknown>;
@@ -23,6 +29,28 @@ function mapSession(row: PgRow): Session {
     isRevoked: row.is_revoked as boolean,
     metadata: row.metadata as Record<string, unknown> | undefined,
   };
+}
+
+/**
+ * Run a function inside a database transaction using a dedicated client.
+ *
+ * CRITICAL: pool.query('BEGIN') is UNSAFE for transactions because each
+ * pool.query() may use a different connection. We must use pool.connect()
+ * to get a dedicated client and run all queries on that single connection.
+ */
+async function withTransaction<T>(pool: PgPool, fn: (client: PgClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -226,33 +254,25 @@ export function createPostgresAdapter(pool: PgPool, options: { tablePrefix?: str
     },
 
     async removeTOTPSecret(userId) {
-      await pool.query('BEGIN');
-      try {
-        await pool.query(`DELETE FROM ${t('totp_secrets')} WHERE user_id = $1`, [userId]);
-        await pool.query(`DELETE FROM ${t('backup_codes')} WHERE user_id = $1`, [userId]);
-        await pool.query('COMMIT');
-      } catch (err) {
-        await pool.query('ROLLBACK');
-        throw err;
-      }
+      // Use a dedicated client for the transaction — pool.query('BEGIN')
+      // is UNSAFE because each call may use a different connection.
+      await withTransaction(pool, async (client) => {
+        await client.query(`DELETE FROM ${t('totp_secrets')} WHERE user_id = $1`, [userId]);
+        await client.query(`DELETE FROM ${t('backup_codes')} WHERE user_id = $1`, [userId]);
+      });
     },
 
     async storeBackupCodes(userId, codes) {
-      await pool.query('BEGIN');
-      try {
-        await pool.query(`DELETE FROM ${t('backup_codes')} WHERE user_id = $1`, [userId]);
+      await withTransaction(pool, async (client) => {
+        await client.query(`DELETE FROM ${t('backup_codes')} WHERE user_id = $1`, [userId]);
         if (codes.length > 0) {
           const placeholders = codes.map((_, i) => `($1, $${i + 2})`).join(', ');
-          await pool.query(
+          await client.query(
             `INSERT INTO ${t('backup_codes')} (user_id, code) VALUES ${placeholders}`,
             [userId, ...codes],
           );
         }
-        await pool.query('COMMIT');
-      } catch (err) {
-        await pool.query('ROLLBACK');
-        throw err;
-      }
+      });
     },
 
     async getBackupCodes(userId) {

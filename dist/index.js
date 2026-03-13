@@ -113,6 +113,7 @@ var EmailError = class extends LockVaultError {
 };
 
 // src/utils/crypto.ts
+var PROCESS_COMPARE_KEY = crypto.randomBytes(32).toString("hex");
 function generateId(length = 32) {
   return crypto.randomBytes(length).toString("hex");
 }
@@ -130,10 +131,11 @@ function generateUUID() {
   ].join("-");
 }
 function safeCompare(a, b) {
-  const key = "lockvault-safe-compare";
-  const hmacA = crypto.createHmac("sha256", key).update(a).digest();
-  const hmacB = crypto.createHmac("sha256", key).update(b).digest();
-  return crypto.timingSafeEqual(hmacA, hmacB) && a.length === b.length;
+  const hmacA = crypto.createHmac("sha256", PROCESS_COMPARE_KEY).update(a).digest();
+  const hmacB = crypto.createHmac("sha256", PROCESS_COMPARE_KEY).update(b).digest();
+  const hmacEqual = crypto.timingSafeEqual(hmacA, hmacB);
+  const lengthEqual = a.length === b.length;
+  return hmacEqual && lengthEqual;
 }
 function encrypt(plaintext, keyHex) {
   if (keyHex.length !== 64) {
@@ -144,7 +146,8 @@ function encrypt(plaintext, keyHex) {
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const authTag = cipher.getAuthTag();
-  return Buffer.concat([iv, authTag, encrypted]).toString("base64url");
+  const version = Buffer.from([1]);
+  return Buffer.concat([version, iv, authTag, encrypted]).toString("base64url");
 }
 function decrypt(ciphertext, keyHex) {
   if (keyHex.length !== 64) {
@@ -153,9 +156,16 @@ function decrypt(ciphertext, keyHex) {
   try {
     const key = Buffer.from(keyHex, "hex");
     const data = Buffer.from(ciphertext, "base64url");
-    const iv = data.subarray(0, 12);
-    const authTag = data.subarray(12, 28);
-    const encrypted = data.subarray(28);
+    let iv, authTag, encrypted;
+    if (data[0] === 1 && data.length > 29) {
+      iv = data.subarray(1, 13);
+      authTag = data.subarray(13, 29);
+      encrypted = data.subarray(29);
+    } else {
+      iv = data.subarray(0, 12);
+      authTag = data.subarray(12, 28);
+      encrypted = data.subarray(28);
+    }
     const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
     decipher.setAuthTag(authTag);
     return decipher.update(encrypted) + decipher.final("utf8");
@@ -163,21 +173,42 @@ function decrypt(ciphertext, keyHex) {
     throw new LockVaultError("Failed to decrypt token", "ENCRYPTION_ERROR" /* ENCRYPTION_ERROR */, 401);
   }
 }
-async function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString("hex");
+async function hashPassword(password, options) {
+  const N = options?.N ?? 32768;
+  const r = options?.r ?? 8;
+  const p = options?.p ?? 2;
+  const salt = crypto.randomBytes(32).toString("hex");
   const derived = await new Promise((resolve, reject) => {
-    crypto.scrypt(password, salt, 64, { N: 16384, r: 8, p: 1 }, (err, key) => {
+    crypto.scrypt(password, salt, 64, { N, r, p, maxmem: N * r * 256 }, (err, key) => {
       if (err) reject(err);
       else resolve(key);
     });
   });
-  return `${salt}:${derived.toString("hex")}`;
+  return `scrypt:${N}:${r}:${p}:${salt}:${derived.toString("hex")}`;
 }
 async function verifyPassword(password, hash) {
-  const [salt, key] = hash.split(":");
+  let salt, key, N, r, p;
+  if (hash.startsWith("scrypt:")) {
+    const parts = hash.split(":");
+    if (parts.length !== 6) return false;
+    N = parseInt(parts[1], 10);
+    r = parseInt(parts[2], 10);
+    p = parseInt(parts[3], 10);
+    salt = parts[4];
+    key = parts[5];
+    if (isNaN(N) || isNaN(r) || isNaN(p)) return false;
+  } else {
+    const parts = hash.split(":");
+    if (parts.length !== 2) return false;
+    salt = parts[0];
+    key = parts[1];
+    N = 16384;
+    r = 8;
+    p = 1;
+  }
   if (!salt || !key) return false;
   const derived = await new Promise((resolve, reject) => {
-    crypto.scrypt(password, salt, 64, { N: 16384, r: 8, p: 1 }, (err, derivedKey) => {
+    crypto.scrypt(password, salt, 64, { N, r, p, maxmem: N * r * 256 }, (err, derivedKey) => {
       if (err) reject(err);
       else resolve(derivedKey);
     });
@@ -227,6 +258,35 @@ function base32Decode(encoded) {
   }
   return Buffer.from(bytes);
 }
+function generateTokenFingerprint(ipAddress, userAgent) {
+  const data = `${ipAddress ?? "unknown"}|${userAgent ?? "unknown"}`;
+  return crypto.createHash("sha256").update(data).digest("base64url").slice(0, 16);
+}
+function sanitizeIpAddress(ip) {
+  if (!ip || typeof ip !== "string") return void 0;
+  const cleaned = ip.trim().split(",")[0]?.trim();
+  if (!cleaned || cleaned.length > 45) return void 0;
+  const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+  const v4Match = cleaned.match(ipv4Regex);
+  if (v4Match) {
+    const valid = [v4Match[1], v4Match[2], v4Match[3], v4Match[4]].every((o) => parseInt(o, 10) <= 255);
+    return valid ? cleaned : void 0;
+  }
+  const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+  if (ipv6Regex.test(cleaned)) return cleaned;
+  const mappedRegex = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i;
+  const mappedMatch = cleaned.match(mappedRegex);
+  if (mappedMatch) return mappedMatch[1];
+  return void 0;
+}
+function generatePKCE() {
+  const codeVerifier = crypto.randomBytes(32).toString("base64url");
+  const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+  return { codeVerifier, codeChallenge, codeChallengeMethod: "S256" };
+}
+function generateCSRFToken() {
+  return crypto.randomBytes(32).toString("base64url");
+}
 
 // src/jwt/index.ts
 function base64UrlEncode(data) {
@@ -237,6 +297,9 @@ function base64UrlDecode(str) {
   return Buffer.from(str, "base64url").toString("utf8");
 }
 var ASYMMETRIC_ALGS = /* @__PURE__ */ new Set(["RS256", "ES256", "ES384", "ES512", "EdDSA"]);
+function deriveKid(secret) {
+  return crypto.createHash("sha256").update(secret).digest("base64url").slice(0, 8);
+}
 function createJWTManager(config, hooks = {}) {
   const adapter = config.adapter;
   let previousSecrets = [];
@@ -250,7 +313,9 @@ function createJWTManager(config, hooks = {}) {
   }
   function signToken(payload, secret) {
     const algorithm = config.jwt.algorithm ?? "HS256";
+    const kid = ASYMMETRIC_ALGS.has(algorithm) ? void 0 : deriveKid(secret);
     const header = { alg: algorithm, typ: "JWT" };
+    if (kid) header.kid = kid;
     const headerB64 = base64UrlEncode(JSON.stringify(header));
     const payloadB64 = base64UrlEncode(JSON.stringify(payload));
     const signingInput = `${headerB64}.${payloadB64}`;
@@ -294,13 +359,19 @@ function createJWTManager(config, hooks = {}) {
     }
     return `${signingInput}.${signature}`;
   }
-  function verifySignature(algorithm, signingInput, signature, secret) {
+  function verifySignature(algorithm, signingInput, signature, secret, kid) {
     const sigBuf = Buffer.from(signature, "base64url");
     const inputBuf = Buffer.from(signingInput);
     switch (algorithm) {
       case "HS256": {
-        const secrets = [secret, ...previousSecrets];
-        for (const s of secrets) {
+        const allSecrets = kid ? [
+          ...deriveKid(secret) === kid ? [secret] : [],
+          ...previousSecrets.filter((s) => s.kid === kid).map((s) => s.secret),
+          // Fallback: try all if kid didn't match (handles legacy tokens)
+          ...deriveKid(secret) !== kid ? [secret] : [],
+          ...previousSecrets.filter((s) => s.kid !== kid).map((s) => s.secret)
+        ] : [secret, ...previousSecrets.map((s) => s.secret)];
+        for (const s of allSecrets) {
           const expected = crypto.createHmac("sha256", s).update(signingInput).digest("base64url");
           if (safeCompare(expected, signature)) return true;
         }
@@ -344,18 +415,20 @@ function createJWTManager(config, hooks = {}) {
     } catch {
       throw new TokenInvalidError("Malformed token header");
     }
-    if (header.alg !== algorithm) throw new TokenInvalidError(`Algorithm mismatch: token uses "${header.alg}" but server requires "${algorithm}"`);
-    if (!verifySignature(algorithm, signingInput, signature, secret)) throw new TokenInvalidError("Invalid signature");
+    if (header.alg !== algorithm) throw new TokenInvalidError(`Algorithm mismatch: expected "${algorithm}"`);
+    if (!verifySignature(algorithm, signingInput, signature, secret, header.kid)) {
+      throw new TokenInvalidError("Invalid signature");
+    }
     const payload = JSON.parse(base64UrlDecode(payloadB64));
     const now = Math.floor(Date.now() / 1e3);
     if (payload.exp && payload.exp < now) throw new TokenExpiredError();
     if (payload.nbf && payload.nbf > now) throw new TokenInvalidError("Token is not yet valid");
     const expectedIssuer = config.jwt.issuer;
-    if (expectedIssuer && payload.iss !== expectedIssuer) throw new TokenInvalidError(`Issuer mismatch: expected "${expectedIssuer}" but got "${payload.iss}"`);
+    if (expectedIssuer && payload.iss !== expectedIssuer) throw new TokenInvalidError("Issuer mismatch");
     const expectedAudience = config.jwt.audience;
     if (expectedAudience) {
       const tokenAud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-      if (!tokenAud.includes(expectedAudience)) throw new TokenInvalidError(`Audience mismatch: expected "${expectedAudience}"`);
+      if (!tokenAud.includes(expectedAudience)) throw new TokenInvalidError("Audience mismatch");
     }
     return payload;
   }
@@ -370,14 +443,41 @@ function createJWTManager(config, hooks = {}) {
       const accessJti = generateUUID();
       const refreshJti = generateUUID();
       const family = generateUUID();
-      const accessPayload = { sub: userId, iat: now, nbf: now, exp: now + accessTTL, jti: accessJti, type: "access", ...jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}, ...jwtConfig.audience ? { aud: jwtConfig.audience } : {}, ...sessionId ? { sid: sessionId } : {}, ...claims };
-      const refreshPayload = { sub: userId, iat: now, nbf: now, exp: now + refreshTTL, jti: refreshJti, type: "refresh", family, generation: 0, ...jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}, ...sessionId ? { sid: sessionId } : {} };
+      const accessPayload = {
+        sub: userId,
+        iat: now,
+        nbf: now,
+        exp: now + accessTTL,
+        jti: accessJti,
+        type: "access",
+        ...jwtConfig.issuer ? { iss: jwtConfig.issuer } : {},
+        ...jwtConfig.audience ? { aud: jwtConfig.audience } : {},
+        ...sessionId ? { sid: sessionId } : {},
+        ...claims
+      };
+      const refreshPayload = {
+        sub: userId,
+        iat: now,
+        nbf: now,
+        exp: now + refreshTTL,
+        jti: refreshJti,
+        type: "refresh",
+        family,
+        generation: 0,
+        ...jwtConfig.issuer ? { iss: jwtConfig.issuer } : {},
+        ...sessionId ? { sid: sessionId } : {}
+      };
       const accessToken = signToken(accessPayload, jwtConfig.accessTokenSecret);
       let refreshToken = signToken(refreshPayload, jwtConfig.refreshTokenSecret ?? jwtConfig.accessTokenSecret);
       const encConfig = config.refreshToken?.encryption;
       if (encConfig?.enabled) refreshToken = encrypt(refreshToken, encConfig.key);
       await adapter.storeRefreshTokenFamily(family, userId, 0);
-      const tokenPair = { accessToken, refreshToken, accessTokenExpiresAt: new Date((now + accessTTL) * 1e3), refreshTokenExpiresAt: new Date((now + refreshTTL) * 1e3) };
+      const tokenPair = {
+        accessToken,
+        refreshToken,
+        accessTokenExpiresAt: new Date((now + accessTTL) * 1e3),
+        refreshTokenExpiresAt: new Date((now + refreshTTL) * 1e3)
+      };
       if (hooks.afterTokenCreate) await hooks.afterTokenCreate(tokenPair);
       return tokenPair;
     },
@@ -423,13 +523,40 @@ function createJWTManager(config, hooks = {}) {
       const newGeneration = await adapter.incrementRefreshTokenGeneration(family);
       const accessJti = generateUUID();
       const refreshJti = generateUUID();
-      const accessPayload = { sub: userId, iat: now, nbf: now, exp: now + accessTTL, jti: accessJti, type: "access", ...jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}, ...jwtConfig.audience ? { aud: jwtConfig.audience } : {}, ...payload.sid ? { sid: payload.sid } : {}, ...claims };
-      const refreshPayload = { sub: userId, iat: now, nbf: now, exp: now + refreshTTL, jti: refreshJti, type: "refresh", family, generation: newGeneration, ...jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}, ...payload.sid ? { sid: payload.sid } : {} };
+      const accessPayload = {
+        sub: userId,
+        iat: now,
+        nbf: now,
+        exp: now + accessTTL,
+        jti: accessJti,
+        type: "access",
+        ...jwtConfig.issuer ? { iss: jwtConfig.issuer } : {},
+        ...jwtConfig.audience ? { aud: jwtConfig.audience } : {},
+        ...payload.sid ? { sid: payload.sid } : {},
+        ...claims
+      };
+      const refreshPayload = {
+        sub: userId,
+        iat: now,
+        nbf: now,
+        exp: now + refreshTTL,
+        jti: refreshJti,
+        type: "refresh",
+        family,
+        generation: newGeneration,
+        ...jwtConfig.issuer ? { iss: jwtConfig.issuer } : {},
+        ...payload.sid ? { sid: payload.sid } : {}
+      };
       const newAccessToken = signToken(accessPayload, jwtConfig.accessTokenSecret);
       let newRefreshToken = signToken(refreshPayload, jwtConfig.refreshTokenSecret ?? jwtConfig.accessTokenSecret);
       const encConfig = config.refreshToken?.encryption;
       if (encConfig?.enabled) newRefreshToken = encrypt(newRefreshToken, encConfig.key);
-      const tokenPair = { accessToken: newAccessToken, refreshToken: newRefreshToken, accessTokenExpiresAt: new Date((now + accessTTL) * 1e3), refreshTokenExpiresAt: new Date((now + refreshTTL) * 1e3) };
+      const tokenPair = {
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+        accessTokenExpiresAt: new Date((now + accessTTL) * 1e3),
+        refreshTokenExpiresAt: new Date((now + refreshTTL) * 1e3)
+      };
       if (hooks.afterTokenCreate) await hooks.afterTokenCreate(tokenPair);
       return tokenPair;
     },
@@ -453,7 +580,9 @@ function createJWTManager(config, hooks = {}) {
         throw new TokenInvalidError("Cannot revoke: token is malformed");
       }
       const secret = payload.type === "refresh" ? config.jwt.refreshTokenSecret ?? config.jwt.accessTokenSecret : config.jwt.accessTokenSecret;
-      if (!verifySignature(algorithm, signingInput, signature, secret)) throw new TokenInvalidError("Cannot revoke: invalid signature");
+      if (!verifySignature(algorithm, signingInput, signature, secret, header.kid)) {
+        throw new TokenInvalidError("Cannot revoke: invalid signature");
+      }
       await adapter.addToRevocationList(payload.jti, new Date(payload.exp * 1e3));
       if (payload.type === "refresh") {
         const rp = payload;
@@ -462,7 +591,8 @@ function createJWTManager(config, hooks = {}) {
       if (hooks.onTokenRevoked) await hooks.onTokenRevoked(payload.jti);
     },
     rotateKeys(newSecret) {
-      previousSecrets.push(config.jwt.accessTokenSecret);
+      if (newSecret.length < 32) throw new ConfigurationError("New secret must be at least 32 characters");
+      previousSecrets.push({ secret: config.jwt.accessTokenSecret, kid: deriveKid(config.jwt.accessTokenSecret) });
       config.jwt.accessTokenSecret = newSecret;
       if (previousSecrets.length > 3) previousSecrets.shift();
     },
@@ -518,6 +648,14 @@ function createSessionManager(config, hooks = {}) {
       if (!session) throw new SessionError("Session not found", "SESSION_NOT_FOUND" /* SESSION_NOT_FOUND */);
       if (session.isRevoked) throw new SessionError("Session has been revoked", "SESSION_REVOKED" /* SESSION_REVOKED */);
       if (session.expiresAt < /* @__PURE__ */ new Date()) throw new SessionError("Session has expired", "SESSION_EXPIRED" /* SESSION_EXPIRED */);
+      const absoluteTimeout = config.session?.absoluteTimeout;
+      if (absoluteTimeout) {
+        const ageMs = Date.now() - session.createdAt.getTime();
+        if (ageMs > absoluteTimeout * 1e3) {
+          await adapter.updateSession(sessionId, { isRevoked: true });
+          throw new SessionError("Session exceeded maximum lifetime", "SESSION_EXPIRED" /* SESSION_EXPIRED */);
+        }
+      }
       const inactivityTimeout = config.session?.inactivityTimeout;
       if (inactivityTimeout) {
         const inactiveMs = Date.now() - session.lastActiveAt.getTime();
@@ -529,6 +667,8 @@ function createSessionManager(config, hooks = {}) {
       return session;
     },
     async touchSession(sessionId) {
+      const session = await adapter.getSession(sessionId);
+      if (!session || session.isRevoked || session.expiresAt < /* @__PURE__ */ new Date()) return null;
       return adapter.updateSession(sessionId, { lastActiveAt: /* @__PURE__ */ new Date() });
     },
     async getUserSessions(userId) {
@@ -761,11 +901,11 @@ function createTOTPManager(cfg = {}, adapter, kvStore) {
 
 // src/oauth/index.ts
 var PROVIDER_PRESETS = {
-  google: { authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token", userInfoUrl: "https://www.googleapis.com/oauth2/v2/userinfo", scopes: ["openid", "email", "profile"], mapProfile: (p) => ({ id: String(p.id), email: String(p.email ?? ""), name: String(p.name ?? ""), avatar: String(p.picture ?? ""), raw: p }) },
-  github: { authorizationUrl: "https://github.com/login/oauth/authorize", tokenUrl: "https://github.com/login/oauth/access_token", userInfoUrl: "https://api.github.com/user", scopes: ["read:user", "user:email"], mapProfile: (p) => ({ id: String(p.id), email: String(p.email ?? ""), name: String(p.name ?? p.login ?? ""), avatar: String(p.avatar_url ?? ""), raw: p }) },
-  facebook: { authorizationUrl: "https://www.facebook.com/v18.0/dialog/oauth", tokenUrl: "https://graph.facebook.com/v18.0/oauth/access_token", userInfoUrl: "https://graph.facebook.com/me?fields=id,name,email,picture", scopes: ["email", "public_profile"], mapProfile: (p) => ({ id: String(p.id), email: String(p.email ?? ""), name: String(p.name ?? ""), avatar: p.picture?.data?.url ?? "", raw: p }) },
-  apple: { authorizationUrl: "https://appleid.apple.com/auth/authorize", tokenUrl: "https://appleid.apple.com/auth/token", userInfoUrl: "", scopes: ["name", "email"], mapProfile: (p) => ({ id: String(p.sub), email: String(p.email ?? ""), name: String(p.name ?? ""), raw: p }) },
-  microsoft: { authorizationUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize", tokenUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/token", userInfoUrl: "https://graph.microsoft.com/v1.0/me", scopes: ["openid", "email", "profile"], mapProfile: (p) => ({ id: String(p.id), email: String(p.mail ?? p.userPrincipalName ?? ""), name: String(p.displayName ?? ""), raw: p }) }
+  google: { authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token", userInfoUrl: "https://www.googleapis.com/oauth2/v2/userinfo", scopes: ["openid", "email", "profile"], pkce: true, mapProfile: (p) => ({ id: String(p.id), email: String(p.email ?? ""), name: String(p.name ?? ""), avatar: String(p.picture ?? ""), raw: p }) },
+  github: { authorizationUrl: "https://github.com/login/oauth/authorize", tokenUrl: "https://github.com/login/oauth/access_token", userInfoUrl: "https://api.github.com/user", scopes: ["read:user", "user:email"], pkce: false, mapProfile: (p) => ({ id: String(p.id), email: String(p.email ?? ""), name: String(p.name ?? p.login ?? ""), avatar: String(p.avatar_url ?? ""), raw: p }) },
+  facebook: { authorizationUrl: "https://www.facebook.com/v18.0/dialog/oauth", tokenUrl: "https://graph.facebook.com/v18.0/oauth/access_token", userInfoUrl: "https://graph.facebook.com/me?fields=id,name,email,picture", scopes: ["email", "public_profile"], pkce: false, mapProfile: (p) => ({ id: String(p.id), email: String(p.email ?? ""), name: String(p.name ?? ""), avatar: p.picture?.data?.url ?? "", raw: p }) },
+  apple: { authorizationUrl: "https://appleid.apple.com/auth/authorize", tokenUrl: "https://appleid.apple.com/auth/token", userInfoUrl: "", scopes: ["name", "email"], pkce: true, mapProfile: (p) => ({ id: String(p.sub), email: String(p.email ?? ""), name: String(p.name ?? ""), raw: p }) },
+  microsoft: { authorizationUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize", tokenUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/token", userInfoUrl: "https://graph.microsoft.com/v1.0/me", scopes: ["openid", "email", "profile"], pkce: true, mapProfile: (p) => ({ id: String(p.id), email: String(p.mail ?? p.userPrincipalName ?? ""), name: String(p.displayName ?? ""), raw: p }) }
 };
 function createOAuthManager(providerConfigs = {}, adapter, externalStateStore) {
   const providers = /* @__PURE__ */ new Map();
@@ -777,19 +917,32 @@ function createOAuthManager(providerConfigs = {}, adapter, externalStateStore) {
     if (!p) throw new OAuthError(`OAuth provider '${name}' is not registered`);
     return p;
   }
-  async function exchangeCode(provider, code) {
-    const body = new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: provider.redirectUri, client_id: provider.clientId, client_secret: provider.clientSecret });
-    const response = await fetch(provider.tokenUrl, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: body.toString() });
+  async function exchangeCode(provider, code, codeVerifier) {
+    const params = {
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: provider.redirectUri,
+      client_id: provider.clientId,
+      client_secret: provider.clientSecret
+    };
+    if (codeVerifier) params.code_verifier = codeVerifier;
+    const body = new URLSearchParams(params);
+    const response = await fetch(provider.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: body.toString()
+    });
     if (!response.ok) {
-      const text = await response.text();
-      throw new OAuthError(`Token exchange failed: ${response.status}`, { body: text });
+      throw new OAuthError(`Token exchange failed (HTTP ${response.status})`, { provider: provider.clientId });
     }
     return response.json();
   }
   async function fetchProfile(provider, accessToken) {
     if (!provider.userInfoUrl) throw new OAuthError("Provider does not support user info endpoint");
-    const response = await fetch(provider.userInfoUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!response.ok) throw new OAuthError(`Failed to fetch user profile: ${response.status}`);
+    const response = await fetch(provider.userInfoUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!response.ok) throw new OAuthError(`Failed to fetch user profile (HTTP ${response.status})`);
     const data = await response.json();
     return provider.mapProfile(data);
   }
@@ -807,23 +960,59 @@ function createOAuthManager(providerConfigs = {}, adapter, externalStateStore) {
     async getAuthorizationUrl(providerName, options = {}) {
       const provider = getProvider(providerName);
       const state = options.state ?? generateId(32);
-      await stateStore.set(`oauth_state:${state}`, JSON.stringify({ provider: providerName, metadata: options.metadata }), 6e5);
-      const params = new URLSearchParams({ client_id: provider.clientId, redirect_uri: provider.redirectUri, response_type: "code", state, ...provider.scopes?.length && { scope: provider.scopes.join(" ") } });
-      return `${provider.authorizationUrl}?${params.toString()}`;
+      let codeVerifier;
+      let codeChallenge;
+      let codeChallengeMethod;
+      if (provider.pkce !== false) {
+        const pkce = generatePKCE();
+        codeVerifier = pkce.codeVerifier;
+        codeChallenge = pkce.codeChallenge;
+        codeChallengeMethod = pkce.codeChallengeMethod;
+      }
+      const stateData = JSON.stringify({
+        provider: providerName,
+        metadata: options.metadata,
+        codeVerifier,
+        createdAt: Date.now()
+      });
+      await stateStore.set(`oauth_state:${state}`, stateData, 6e5);
+      const params = {
+        client_id: provider.clientId,
+        redirect_uri: provider.redirectUri,
+        response_type: "code",
+        state
+      };
+      if (provider.scopes?.length) params.scope = provider.scopes.join(" ");
+      if (codeChallenge) {
+        params.code_challenge = codeChallenge;
+        params.code_challenge_method = codeChallengeMethod;
+      }
+      return `${provider.authorizationUrl}?${new URLSearchParams(params).toString()}`;
     },
     async handleCallback(providerName, code, state) {
       const raw = await stateStore.get(`oauth_state:${state}`);
       if (!raw) throw new OAuthError("Invalid or expired OAuth state", { provider: providerName });
       const stateData = JSON.parse(raw);
       if (stateData.provider !== providerName) throw new OAuthError("Invalid or expired OAuth state", { provider: providerName });
+      if (stateData.createdAt && Date.now() - stateData.createdAt > 6e5) {
+        await stateStore.delete(`oauth_state:${state}`);
+        throw new OAuthError("OAuth state has expired", { provider: providerName });
+      }
       await stateStore.delete(`oauth_state:${state}`);
       const provider = getProvider(providerName);
-      const tokens = await exchangeCode(provider, code);
+      const tokens = await exchangeCode(provider, code, stateData.codeVerifier);
       const profile = await fetchProfile(provider, tokens.access_token);
       return { profile, tokens };
     },
     async linkAccount(userId, providerName, profile, tokens) {
-      const link = { provider: providerName, providerUserId: profile.id, accessToken: tokens.access_token, refreshToken: tokens.refresh_token, profile: profile.raw, linkedAt: /* @__PURE__ */ new Date() };
+      const link = {
+        provider: providerName,
+        providerUserId: profile.id,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        profile: profile.raw,
+        linkedAt: /* @__PURE__ */ new Date()
+      };
       await adapter.linkOAuthAccount(userId, link);
     },
     async findUserByOAuth(providerName, providerUserId) {
@@ -1121,9 +1310,13 @@ exports.createRateLimiter = createRateLimiter;
 exports.createSessionManager = createSessionManager;
 exports.createTOTPManager = createTOTPManager;
 exports.generateBackupCodes = generateBackupCodes;
+exports.generateCSRFToken = generateCSRFToken;
 exports.generateId = generateId;
+exports.generatePKCE = generatePKCE;
+exports.generateTokenFingerprint = generateTokenFingerprint;
 exports.generateUUID = generateUUID;
 exports.hashPassword = hashPassword;
+exports.sanitizeIpAddress = sanitizeIpAddress;
 exports.verifyPassword = verifyPassword;
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

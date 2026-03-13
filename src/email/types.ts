@@ -289,6 +289,9 @@ export interface EmailResult {
 
 export interface EmailConfig {
   smtp: SMTPConfig;
+  /** Optional root directory for file-based templates. When set, file paths
+   *  are validated to stay within this directory (prevents path traversal). */
+  templateDir?: string;
   templates?: {
     login?: { theme?: LoginTheme };
     forgotPassword?: { theme?: ForgotPasswordTheme };

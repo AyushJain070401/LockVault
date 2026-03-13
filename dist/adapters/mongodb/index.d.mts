@@ -1,4 +1,4 @@
-import { D as DatabaseAdapter } from '../../index-BN-tpFRY.mjs';
+import { D as DatabaseAdapter } from '../../index-BR3ae_bk.mjs';
 
 interface MongoDb {
     collection(name: string): MongoCollection;

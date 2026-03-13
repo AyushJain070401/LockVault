@@ -1,11 +1,19 @@
-import { D as DatabaseAdapter } from '../../index-BN-tpFRY.js';
+import { D as DatabaseAdapter } from '../../index-BR3ae_bk.js';
 
 interface PgPool {
     query(text: string, values?: unknown[]): Promise<{
         rows: PgRow[];
         rowCount: number | null;
     }>;
+    connect(): Promise<PgClient>;
     end(): Promise<void>;
+}
+interface PgClient {
+    query(text: string, values?: unknown[]): Promise<{
+        rows: PgRow[];
+        rowCount: number | null;
+    }>;
+    release(): void;
 }
 type PgRow = Record<string, unknown>;
 /**

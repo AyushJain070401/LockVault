@@ -1,4 +1,4 @@
-import { D as DatabaseAdapter } from '../../index-BN-tpFRY.js';
+import { D as DatabaseAdapter } from '../../index-BR3ae_bk.js';
 
 interface RedisClient {
     get(key: string): Promise<string | null>;

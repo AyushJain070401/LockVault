@@ -13,12 +13,24 @@
  * in their EmailConfig (for Handlebars, EJS, MJML, etc.).
  */
 
+/** Maximum recursion depth to prevent stack overflow from crafted templates */
+const MAX_RENDER_DEPTH = 16;
+
+/** Maximum array length for {{#each}} to prevent CPU exhaustion */
+const MAX_EACH_ITEMS = 1000;
+
+/** Keys that must never be copied from untrusted objects */
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * Resolve a dot-notation path from a variables object.
  * e.g. resolve('user.name', { user: { name: 'Ayush' } }) → 'Ayush'
  */
 function resolve(path: string, variables: Record<string, unknown>): unknown {
+  // Block prototype access via dot notation
   const parts = path.split('.');
+  if (parts.some(p => DANGEROUS_KEYS.has(p))) return undefined;
+
   let current: unknown = variables;
   for (const part of parts) {
     if (current === null || current === undefined) return undefined;
@@ -27,7 +39,12 @@ function resolve(path: string, variables: Record<string, unknown>): unknown {
   return current;
 }
 
-export function renderTemplate(template: string, variables: Record<string, unknown>): string {
+export function renderTemplate(template: string, variables: Record<string, unknown>, depth: number = 0): string {
+  // Guard against infinite/deep recursion from crafted templates
+  if (depth > MAX_RENDER_DEPTH) {
+    return '[template recursion limit exceeded]';
+  }
+
   let result = template;
 
   // Process {{#each items}}...{{/each}} loops
@@ -36,21 +53,30 @@ export function renderTemplate(template: string, variables: Record<string, unkno
     (_match, varPath: string, body: string) => {
       const arr = resolve(varPath, variables);
       if (!Array.isArray(arr)) return '';
-      return arr
+
+      // Cap iteration count to prevent CPU exhaustion
+      const items = arr.length > MAX_EACH_ITEMS ? arr.slice(0, MAX_EACH_ITEMS) : arr;
+
+      return items
         .map((item, index) => {
           // Inside the loop, inject item properties + @index
           const loopVars: Record<string, unknown> = {
             ...variables,
             '@index': index,
             '@first': index === 0,
-            '@last': index === arr.length - 1,
+            '@last': index === items.length - 1,
           };
           if (typeof item === 'object' && item !== null) {
-            Object.assign(loopVars, item);
+            // Filter out dangerous keys to prevent prototype pollution
+            for (const [key, value] of Object.entries(item as Record<string, unknown>)) {
+              if (!DANGEROUS_KEYS.has(key)) {
+                loopVars[key] = value;
+              }
+            }
           } else {
             loopVars['this'] = item;
           }
-          return renderTemplate(body, loopVars);
+          return renderTemplate(body, loopVars, depth + 1);
         })
         .join('');
     },
@@ -62,7 +88,7 @@ export function renderTemplate(template: string, variables: Record<string, unkno
     (_match, varPath: string, content: string) => {
       const value = resolve(varPath, variables);
       if (value !== undefined && value !== null && value !== '' && value !== false) {
-        return renderTemplate(content, variables);
+        return renderTemplate(content, variables, depth + 1);
       }
       return '';
     },
@@ -74,7 +100,7 @@ export function renderTemplate(template: string, variables: Record<string, unkno
     (_match, varPath: string, content: string) => {
       const value = resolve(varPath, variables);
       if (!value) {
-        return renderTemplate(content, variables);
+        return renderTemplate(content, variables, depth + 1);
       }
       return '';
     },

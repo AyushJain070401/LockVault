@@ -1,4 +1,4 @@
-import { i as AuthErrorCode } from './index-BN-tpFRY.js';
+import { i as AuthErrorCode } from './index-BR3ae_bk.js';
 
 declare class LockVaultError extends Error {
     readonly code: AuthErrorCode;

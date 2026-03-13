@@ -2,7 +2,7 @@ import type { TokenPayload, Session, CookieOptions } from '../types/index.js';
 import type { JWTManager } from '../jwt/index.js';
 import type { SessionManager } from '../session/index.js';
 import { LockVaultError } from '../utils/errors.js';
-import { safeCompare } from '../utils/crypto.js';
+import { safeCompare, generateCSRFToken } from '../utils/crypto.js';
 
 // ─── Type shims for Express (avoids hard dependency) ──────────────────────
 
@@ -11,6 +11,7 @@ interface ExpressRequest {
   cookies?: Record<string, string>;
   body?: Record<string, unknown>;
   query?: Record<string, unknown>;
+  ip?: string;
   lockvault?: {
     user: TokenPayload;
     session?: Session;
@@ -32,7 +33,7 @@ type ExpressMiddleware = (req: ExpressRequest, res: ExpressResponse, next: NextF
 // ─── Token Extraction ────────────────────────────────────────────────────
 
 function extractToken(req: ExpressRequest): string | null {
-  // 1. Authorization header
+  // 1. Authorization header (preferred)
   const authHeader = req.headers.authorization;
   if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
     return authHeader.slice(7);
@@ -43,10 +44,8 @@ function extractToken(req: ExpressRequest): string | null {
     return req.cookies.access_token;
   }
 
-  // 3. Query parameter (not recommended for production)
-  if (typeof req.query?.token === 'string') {
-    return req.query.token;
-  }
+  // NOTE: Query parameter token extraction has been removed for security.
+  // Tokens in URLs are logged by proxies, browsers, and analytics tools.
 
   return null;
 }
@@ -92,7 +91,9 @@ export function authenticate(options: ExpressAuthOptions): ExpressMiddleware {
     } catch (error) {
       if (error instanceof LockVaultError) {
         if (onError) return onError(error, req, res);
-        return res.status(error.statusCode).json({ error: error.message, code: error.code });
+        // Don't leak internal error details — use generic messages
+        const safeMessage = error.statusCode === 401 ? 'Authentication failed' : error.message;
+        return res.status(error.statusCode).json({ error: safeMessage, code: error.code });
       }
       next(error);
     }
@@ -146,6 +147,26 @@ export function csrfProtection(options: { cookieName?: string; headerName?: stri
 }
 
 /**
+ * Generate and set a CSRF token cookie on the response.
+ * Call this on GET requests so the client can read the cookie
+ * and send it back as a header on state-changing requests.
+ */
+export function setCSRFCookie(
+  res: ExpressResponse,
+  options: { cookieName?: string; secure?: boolean; sameSite?: string } = {},
+): string {
+  const token = generateCSRFToken();
+  const cookieName = options.cookieName ?? 'csrf_token';
+  res.cookie(cookieName, token, {
+    httpOnly: false, // Client JS needs to read this
+    secure: options.secure ?? true,
+    sameSite: options.sameSite ?? 'lax',
+    path: '/',
+  });
+  return token;
+}
+
+/**
  * Helper to set auth cookies on a response.
  */
 export function setAuthCookies(
@@ -179,4 +200,21 @@ export function setAuthCookies(
 export function clearAuthCookies(res: ExpressResponse): void {
   res.clearCookie('access_token', { path: '/' });
   res.clearCookie('refresh_token', { path: '/auth/refresh' });
+}
+
+/**
+ * Security headers middleware.
+ * Sets recommended HTTP headers for auth-related responses.
+ */
+export function securityHeaders(): ExpressMiddleware {
+  return (_req: ExpressRequest, res: ExpressResponse, next: NextFunction) => {
+    const r = res as unknown as Record<string, Function>;
+    if (r.setHeader) {
+      r.setHeader('X-Content-Type-Options', 'nosniff');
+      r.setHeader('X-Frame-Options', 'DENY');
+      r.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      r.setHeader('Pragma', 'no-cache');
+    }
+    next();
+  };
 }

@@ -80,7 +80,18 @@ export function createEmailManager(config: EmailConfig): EmailManager {
   async function loadFile(filePath: string): Promise<string> {
     const cached = fileCache.get(filePath);
     if (cached) return cached;
-    const content = await fs.promises.readFile(path.resolve(filePath), 'utf-8');
+
+    // Resolve and validate path to prevent directory traversal
+    const resolved = path.resolve(filePath);
+    const templateDir = config.templateDir;
+    if (templateDir) {
+      const resolvedDir = path.resolve(templateDir);
+      if (!resolved.startsWith(resolvedDir + path.sep) && resolved !== resolvedDir) {
+        throw new Error(`Template path "${filePath}" is outside the allowed template directory`);
+      }
+    }
+
+    const content = await fs.promises.readFile(resolved, 'utf-8');
     fileCache.set(filePath, content);
     return content;
   }

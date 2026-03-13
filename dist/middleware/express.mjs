@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'crypto';
+import { randomBytes, createHmac, timingSafeEqual } from 'crypto';
 
 // src/utils/errors.ts
 var LockVaultError = class _LockVaultError extends Error {
@@ -23,11 +23,16 @@ var LockVaultError = class _LockVaultError extends Error {
     };
   }
 };
+var PROCESS_COMPARE_KEY = randomBytes(32).toString("hex");
 function safeCompare(a, b) {
-  const key = "lockvault-safe-compare";
-  const hmacA = createHmac("sha256", key).update(a).digest();
-  const hmacB = createHmac("sha256", key).update(b).digest();
-  return timingSafeEqual(hmacA, hmacB) && a.length === b.length;
+  const hmacA = createHmac("sha256", PROCESS_COMPARE_KEY).update(a).digest();
+  const hmacB = createHmac("sha256", PROCESS_COMPARE_KEY).update(b).digest();
+  const hmacEqual = timingSafeEqual(hmacA, hmacB);
+  const lengthEqual = a.length === b.length;
+  return hmacEqual && lengthEqual;
+}
+function generateCSRFToken() {
+  return randomBytes(32).toString("base64url");
 }
 
 // src/middleware/express.ts
@@ -38,9 +43,6 @@ function extractToken(req) {
   }
   if (req.cookies?.access_token) {
     return req.cookies.access_token;
-  }
-  if (typeof req.query?.token === "string") {
-    return req.query.token;
   }
   return null;
 }
@@ -66,7 +68,8 @@ function authenticate(options) {
     } catch (error) {
       if (error instanceof LockVaultError) {
         if (onError) return onError(error, req, res);
-        return res.status(error.statusCode).json({ error: error.message, code: error.code });
+        const safeMessage = error.statusCode === 401 ? "Authentication failed" : error.message;
+        return res.status(error.statusCode).json({ error: safeMessage, code: error.code });
       }
       next(error);
     }
@@ -101,6 +104,18 @@ function csrfProtection(options = {}) {
     next();
   };
 }
+function setCSRFCookie(res, options = {}) {
+  const token = generateCSRFToken();
+  const cookieName = options.cookieName ?? "csrf_token";
+  res.cookie(cookieName, token, {
+    httpOnly: false,
+    // Client JS needs to read this
+    secure: options.secure ?? true,
+    sameSite: options.sameSite ?? "lax",
+    path: "/"
+  });
+  return token;
+}
 function setAuthCookies(res, tokens, options = {}) {
   const defaults = {
     httpOnly: true,
@@ -124,7 +139,19 @@ function clearAuthCookies(res) {
   res.clearCookie("access_token", { path: "/" });
   res.clearCookie("refresh_token", { path: "/auth/refresh" });
 }
+function securityHeaders() {
+  return (_req, res, next) => {
+    const r = res;
+    if (r.setHeader) {
+      r.setHeader("X-Content-Type-Options", "nosniff");
+      r.setHeader("X-Frame-Options", "DENY");
+      r.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      r.setHeader("Pragma", "no-cache");
+    }
+    next();
+  };
+}
 
-export { authenticate, authorize, clearAuthCookies, csrfProtection, setAuthCookies };
+export { authenticate, authorize, clearAuthCookies, csrfProtection, securityHeaders, setAuthCookies, setCSRFCookie };
 //# sourceMappingURL=express.mjs.map
 //# sourceMappingURL=express.mjs.map

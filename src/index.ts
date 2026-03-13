@@ -61,4 +61,4 @@ export type {
 } from './email/types.js';
 
 // ─── Utilities ───────────────────────────────────────────────────────────
-export { hashPassword, verifyPassword, generateId, generateUUID, generateBackupCodes } from './utils/crypto.js';
+export { hashPassword, verifyPassword, generateId, generateUUID, generateBackupCodes, generateTokenFingerprint, sanitizeIpAddress, generatePKCE, generateCSRFToken } from './utils/crypto.js';

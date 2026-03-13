@@ -109,6 +109,8 @@ export interface OAuthProviderConfig {
   authorizationUrl: string;
   tokenUrl: string;
   userInfoUrl: string;
+  /** Enable PKCE (Proof Key for Code Exchange) for this provider. Default: true for presets that support it */
+  pkce?: boolean;
   mapProfile: (profile: Record<string, unknown>) => OAuthUserProfile;
 }
 
@@ -204,6 +206,7 @@ export interface LockVaultConfig {
     enabled?: boolean;
     maxPerUser?: number;            // max concurrent sessions
     inactivityTimeout?: number;     // seconds
+    absoluteTimeout?: number;       // seconds — max session lifetime regardless of activity
   };
   refreshToken?: {
     rotation?: boolean;             // default true

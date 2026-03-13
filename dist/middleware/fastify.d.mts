@@ -1,5 +1,5 @@
-import { o as TokenPayload, S as Session, C as CookieOptions } from '../index-BN-tpFRY.mjs';
-import { J as JWTManager, S as SessionManager } from '../index-CBgAYknw.mjs';
+import { o as TokenPayload, S as Session, C as CookieOptions } from '../index-BR3ae_bk.mjs';
+import { J as JWTManager, S as SessionManager } from '../index-Dg1l0E-g.mjs';
 
 interface FastifyRequest {
     headers: Record<string, string | string[] | undefined>;
@@ -15,6 +15,7 @@ interface FastifyRequest {
 interface FastifyReply {
     code(statusCode: number): FastifyReply;
     send(payload?: unknown): FastifyReply;
+    sent: boolean;
     setCookie(name: string, value: string, options?: Record<string, unknown>): FastifyReply;
     clearCookie(name: string, options?: Record<string, unknown>): FastifyReply;
 }

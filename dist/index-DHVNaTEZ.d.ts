@@ -1,4 +1,4 @@
-import { g as TokenPair, A as AccessTokenPayload, n as RefreshTokenPayload, k as DecodedToken, L as LockVaultConfig, l as LockVaultHooks, f as DeviceInfo, S as Session } from './index-BN-tpFRY.js';
+import { g as TokenPair, A as AccessTokenPayload, n as RefreshTokenPayload, k as DecodedToken, L as LockVaultConfig, l as LockVaultHooks, f as DeviceInfo, S as Session } from './index-BR3ae_bk.js';
 
 interface JWTManager {
     createTokenPair(userId: string, customClaims?: Record<string, unknown>, sessionId?: string): Promise<TokenPair>;

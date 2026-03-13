@@ -1,4 +1,4 @@
-import { createSign, createVerify, createHmac, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
+import { createSign, createVerify, createHmac, sign as cryptoSign, verify as cryptoVerify, createHash } from 'node:crypto';
 import { TokenPayload, AccessTokenPayload, RefreshTokenPayload, TokenPair, DecodedToken, LockVaultConfig, DatabaseAdapter, LockVaultHooks } from '../types/index.js';
 import { generateUUID, encrypt, decrypt, safeCompare } from '../utils/crypto.js';
 import { TokenExpiredError, TokenInvalidError, TokenRevokedError, RefreshTokenReuseError, ConfigurationError } from '../utils/errors.js';
@@ -13,6 +13,11 @@ function base64UrlDecode(str: string): string {
 
 const ASYMMETRIC_ALGS = new Set(['RS256', 'ES256', 'ES384', 'ES512', 'EdDSA']);
 
+/** Generate a short key ID from a secret for the `kid` header */
+function deriveKid(secret: string): string {
+  return createHash('sha256').update(secret).digest('base64url').slice(0, 8);
+}
+
 export interface JWTManager {
   createTokenPair(userId: string, customClaims?: Record<string, unknown>, sessionId?: string): Promise<TokenPair>;
   verifyAccessToken(token: string): Promise<AccessTokenPayload>;
@@ -25,7 +30,7 @@ export interface JWTManager {
 
 export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVaultHooks> = {}): JWTManager {
   const adapter: DatabaseAdapter = config.adapter;
-  let previousSecrets: string[] = [];
+  let previousSecrets: Array<{ secret: string; kid: string }> = [];
 
   // Validate config
   const alg = config.jwt.algorithm ?? 'HS256';
@@ -41,7 +46,10 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
 
   function signToken(payload: TokenPayload, secret: string): string {
     const algorithm = config.jwt.algorithm ?? 'HS256';
-    const header = { alg: algorithm, typ: 'JWT' };
+    const kid = ASYMMETRIC_ALGS.has(algorithm) ? undefined : deriveKid(secret);
+    const header: Record<string, unknown> = { alg: algorithm, typ: 'JWT' };
+    if (kid) header.kid = kid;
+
     const headerB64 = base64UrlEncode(JSON.stringify(header));
     const payloadB64 = base64UrlEncode(JSON.stringify(payload));
     const signingInput = `${headerB64}.${payloadB64}`;
@@ -59,11 +67,28 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
     return `${signingInput}.${signature}`;
   }
 
-  function verifySignature(algorithm: string, signingInput: string, signature: string, secret: string): boolean {
+  function verifySignature(algorithm: string, signingInput: string, signature: string, secret: string, kid?: string): boolean {
     const sigBuf = Buffer.from(signature, 'base64url');
     const inputBuf = Buffer.from(signingInput);
     switch (algorithm) {
-      case 'HS256': { const secrets = [secret, ...previousSecrets]; for (const s of secrets) { const expected = createHmac('sha256', s).update(signingInput).digest('base64url'); if (safeCompare(expected, signature)) return true; } return false; }
+      case 'HS256': {
+        // If kid is present, try to find the matching key first for efficiency
+        const allSecrets = kid
+          ? [
+              ...(deriveKid(secret) === kid ? [secret] : []),
+              ...previousSecrets.filter(s => s.kid === kid).map(s => s.secret),
+              // Fallback: try all if kid didn't match (handles legacy tokens)
+              ...(deriveKid(secret) !== kid ? [secret] : []),
+              ...previousSecrets.filter(s => s.kid !== kid).map(s => s.secret),
+            ]
+          : [secret, ...previousSecrets.map(s => s.secret)];
+
+        for (const s of allSecrets) {
+          const expected = createHmac('sha256', s).update(signingInput).digest('base64url');
+          if (safeCompare(expected, signature)) return true;
+        }
+        return false;
+      }
       case 'RS256': { const v = createVerify('RSA-SHA256'); v.update(signingInput); return v.verify(config.jwt.publicKey!, sigBuf); }
       case 'ES256': { const v = createVerify('SHA256'); v.update(signingInput); return v.verify({ key: config.jwt.publicKey!, dsaEncoding: 'ieee-p1363' }, sigBuf); }
       case 'ES384': { const v = createVerify('SHA384'); v.update(signingInput); return v.verify({ key: config.jwt.publicKey!, dsaEncoding: 'ieee-p1363' }, sigBuf); }
@@ -82,9 +107,11 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
 
     let header: Record<string, unknown>;
     try { header = JSON.parse(base64UrlDecode(headerB64)); } catch { throw new TokenInvalidError('Malformed token header'); }
-    if (header.alg !== algorithm) throw new TokenInvalidError(`Algorithm mismatch: token uses "${header.alg}" but server requires "${algorithm}"`);
+    if (header.alg !== algorithm) throw new TokenInvalidError(`Algorithm mismatch: expected "${algorithm}"`);
 
-    if (!verifySignature(algorithm, signingInput, signature, secret)) throw new TokenInvalidError('Invalid signature');
+    if (!verifySignature(algorithm, signingInput, signature, secret, header.kid as string | undefined)) {
+      throw new TokenInvalidError('Invalid signature');
+    }
 
     const payload = JSON.parse(base64UrlDecode(payloadB64)) as TokenPayload;
     const now = Math.floor(Date.now() / 1000);
@@ -92,11 +119,11 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
     if (payload.nbf && payload.nbf > now) throw new TokenInvalidError('Token is not yet valid');
 
     const expectedIssuer = config.jwt.issuer;
-    if (expectedIssuer && payload.iss !== expectedIssuer) throw new TokenInvalidError(`Issuer mismatch: expected "${expectedIssuer}" but got "${payload.iss}"`);
+    if (expectedIssuer && payload.iss !== expectedIssuer) throw new TokenInvalidError('Issuer mismatch');
     const expectedAudience = config.jwt.audience;
     if (expectedAudience) {
       const tokenAud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-      if (!tokenAud.includes(expectedAudience)) throw new TokenInvalidError(`Audience mismatch: expected "${expectedAudience}"`);
+      if (!tokenAud.includes(expectedAudience)) throw new TokenInvalidError('Audience mismatch');
     }
     return payload;
   }
@@ -113,8 +140,19 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
       if (hooks.beforeTokenCreate) claims = await hooks.beforeTokenCreate(claims);
 
       const accessJti = generateUUID(); const refreshJti = generateUUID(); const family = generateUUID();
-      const accessPayload: AccessTokenPayload = { sub: userId, iat: now, nbf: now, exp: now + accessTTL, jti: accessJti, type: 'access', ...(jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}), ...(jwtConfig.audience ? { aud: jwtConfig.audience } : {}), ...(sessionId ? { sid: sessionId } : {}), ...claims };
-      const refreshPayload: RefreshTokenPayload = { sub: userId, iat: now, nbf: now, exp: now + refreshTTL, jti: refreshJti, type: 'refresh', family, generation: 0, ...(jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}), ...(sessionId ? { sid: sessionId } : {}) };
+      const accessPayload: AccessTokenPayload = {
+        sub: userId, iat: now, nbf: now, exp: now + accessTTL, jti: accessJti, type: 'access',
+        ...(jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}),
+        ...(jwtConfig.audience ? { aud: jwtConfig.audience } : {}),
+        ...(sessionId ? { sid: sessionId } : {}),
+        ...claims,
+      };
+      const refreshPayload: RefreshTokenPayload = {
+        sub: userId, iat: now, nbf: now, exp: now + refreshTTL, jti: refreshJti, type: 'refresh',
+        family, generation: 0,
+        ...(jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}),
+        ...(sessionId ? { sid: sessionId } : {}),
+      };
 
       const accessToken = signToken(accessPayload, jwtConfig.accessTokenSecret);
       let refreshToken = signToken(refreshPayload, jwtConfig.refreshTokenSecret ?? jwtConfig.accessTokenSecret);
@@ -122,7 +160,11 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
       if (encConfig?.enabled) refreshToken = encrypt(refreshToken, encConfig.key);
       await adapter.storeRefreshTokenFamily(family, userId, 0);
 
-      const tokenPair: TokenPair = { accessToken, refreshToken, accessTokenExpiresAt: new Date((now + accessTTL) * 1000), refreshTokenExpiresAt: new Date((now + refreshTTL) * 1000) };
+      const tokenPair: TokenPair = {
+        accessToken, refreshToken,
+        accessTokenExpiresAt: new Date((now + accessTTL) * 1000),
+        refreshTokenExpiresAt: new Date((now + refreshTTL) * 1000),
+      };
       if (hooks.afterTokenCreate) await hooks.afterTokenCreate(tokenPair);
       return tokenPair;
     },
@@ -156,7 +198,10 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
 
       const reuseConfig = config.refreshToken;
       if (reuseConfig?.reuseDetection !== false && generation < familyRecord.generation) {
-        if (reuseConfig?.familyRevocationOnReuse !== false) { await adapter.revokeRefreshTokenFamily(family); await adapter.deleteSessionsByUser(userId); }
+        if (reuseConfig?.familyRevocationOnReuse !== false) {
+          await adapter.revokeRefreshTokenFamily(family);
+          await adapter.deleteSessionsByUser(userId);
+        }
         if (hooks.onReuseDetected) await hooks.onReuseDetected(family, userId);
         throw new RefreshTokenReuseError(family);
       }
@@ -170,15 +215,30 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
       const newGeneration = await adapter.incrementRefreshTokenGeneration(family);
       const accessJti = generateUUID(); const refreshJti = generateUUID();
 
-      const accessPayload: AccessTokenPayload = { sub: userId, iat: now, nbf: now, exp: now + accessTTL, jti: accessJti, type: 'access', ...(jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}), ...(jwtConfig.audience ? { aud: jwtConfig.audience } : {}), ...(payload.sid ? { sid: payload.sid } : {}), ...claims };
-      const refreshPayload: RefreshTokenPayload = { sub: userId, iat: now, nbf: now, exp: now + refreshTTL, jti: refreshJti, type: 'refresh', family, generation: newGeneration, ...(jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}), ...(payload.sid ? { sid: payload.sid } : {}) };
+      const accessPayload: AccessTokenPayload = {
+        sub: userId, iat: now, nbf: now, exp: now + accessTTL, jti: accessJti, type: 'access',
+        ...(jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}),
+        ...(jwtConfig.audience ? { aud: jwtConfig.audience } : {}),
+        ...(payload.sid ? { sid: payload.sid } : {}),
+        ...claims,
+      };
+      const refreshPayload: RefreshTokenPayload = {
+        sub: userId, iat: now, nbf: now, exp: now + refreshTTL, jti: refreshJti, type: 'refresh',
+        family, generation: newGeneration,
+        ...(jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}),
+        ...(payload.sid ? { sid: payload.sid } : {}),
+      };
 
       const newAccessToken = signToken(accessPayload, jwtConfig.accessTokenSecret);
       let newRefreshToken = signToken(refreshPayload, jwtConfig.refreshTokenSecret ?? jwtConfig.accessTokenSecret);
       const encConfig = config.refreshToken?.encryption;
       if (encConfig?.enabled) newRefreshToken = encrypt(newRefreshToken, encConfig.key);
 
-      const tokenPair: TokenPair = { accessToken: newAccessToken, refreshToken: newRefreshToken, accessTokenExpiresAt: new Date((now + accessTTL) * 1000), refreshTokenExpiresAt: new Date((now + refreshTTL) * 1000) };
+      const tokenPair: TokenPair = {
+        accessToken: newAccessToken, refreshToken: newRefreshToken,
+        accessTokenExpiresAt: new Date((now + accessTTL) * 1000),
+        refreshTokenExpiresAt: new Date((now + refreshTTL) * 1000),
+      };
       if (hooks.afterTokenCreate) await hooks.afterTokenCreate(tokenPair);
       return tokenPair;
     },
@@ -198,16 +258,23 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
       try { payload = JSON.parse(base64UrlDecode(payloadB64)) as TokenPayload; } catch { throw new TokenInvalidError('Cannot revoke: token is malformed'); }
 
       const secret = payload.type === 'refresh' ? (config.jwt.refreshTokenSecret ?? config.jwt.accessTokenSecret) : config.jwt.accessTokenSecret;
-      if (!verifySignature(algorithm, signingInput, signature, secret)) throw new TokenInvalidError('Cannot revoke: invalid signature');
+      if (!verifySignature(algorithm, signingInput, signature, secret, header.kid as string | undefined)) {
+        throw new TokenInvalidError('Cannot revoke: invalid signature');
+      }
 
       await adapter.addToRevocationList(payload.jti, new Date(payload.exp * 1000));
-      if (payload.type === 'refresh') { const rp = payload as RefreshTokenPayload; await adapter.revokeRefreshTokenFamily(rp.family); }
+      if (payload.type === 'refresh') {
+        const rp = payload as RefreshTokenPayload;
+        await adapter.revokeRefreshTokenFamily(rp.family);
+      }
       if (hooks.onTokenRevoked) await hooks.onTokenRevoked(payload.jti);
     },
 
     rotateKeys(newSecret: string) {
-      previousSecrets.push(config.jwt.accessTokenSecret);
+      if (newSecret.length < 32) throw new ConfigurationError('New secret must be at least 32 characters');
+      previousSecrets.push({ secret: config.jwt.accessTokenSecret, kid: deriveKid(config.jwt.accessTokenSecret) });
       config.jwt.accessTokenSecret = newSecret;
+      // Keep last 3 rotated keys for grace period
       if (previousSecrets.length > 3) previousSecrets.shift();
     },
 

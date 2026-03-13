@@ -1,4 +1,4 @@
-import { i as AuthErrorCode } from './index-BN-tpFRY.mjs';
+import { i as AuthErrorCode } from './index-BR3ae_bk.mjs';
 
 declare class LockVaultError extends Error {
     readonly code: AuthErrorCode;

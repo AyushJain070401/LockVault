@@ -4,8 +4,12 @@ import * as path from 'path';
 // src/email/index.ts
 
 // src/email/engine.ts
+var MAX_RENDER_DEPTH = 16;
+var MAX_EACH_ITEMS = 1e3;
+var DANGEROUS_KEYS = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
 function resolve(path2, variables) {
   const parts = path2.split(".");
+  if (parts.some((p) => DANGEROUS_KEYS.has(p))) return void 0;
   let current = variables;
   for (const part of parts) {
     if (current === null || current === void 0) return void 0;
@@ -13,26 +17,34 @@ function resolve(path2, variables) {
   }
   return current;
 }
-function renderTemplate(template, variables) {
+function renderTemplate(template, variables, depth = 0) {
+  if (depth > MAX_RENDER_DEPTH) {
+    return "[template recursion limit exceeded]";
+  }
   let result = template;
   result = result.replace(
     /\{\{#each\s+([\w.]+)\}\}([\s\S]*?)\{\{\/each\}\}/g,
     (_match, varPath, body) => {
       const arr = resolve(varPath, variables);
       if (!Array.isArray(arr)) return "";
-      return arr.map((item, index) => {
+      const items = arr.length > MAX_EACH_ITEMS ? arr.slice(0, MAX_EACH_ITEMS) : arr;
+      return items.map((item, index) => {
         const loopVars = {
           ...variables,
           "@index": index,
           "@first": index === 0,
-          "@last": index === arr.length - 1
+          "@last": index === items.length - 1
         };
         if (typeof item === "object" && item !== null) {
-          Object.assign(loopVars, item);
+          for (const [key, value] of Object.entries(item)) {
+            if (!DANGEROUS_KEYS.has(key)) {
+              loopVars[key] = value;
+            }
+          }
         } else {
           loopVars["this"] = item;
         }
-        return renderTemplate(body, loopVars);
+        return renderTemplate(body, loopVars, depth + 1);
       }).join("");
     }
   );
@@ -41,7 +53,7 @@ function renderTemplate(template, variables) {
     (_match, varPath, content) => {
       const value = resolve(varPath, variables);
       if (value !== void 0 && value !== null && value !== "" && value !== false) {
-        return renderTemplate(content, variables);
+        return renderTemplate(content, variables, depth + 1);
       }
       return "";
     }
@@ -51,7 +63,7 @@ function renderTemplate(template, variables) {
     (_match, varPath, content) => {
       const value = resolve(varPath, variables);
       if (!value) {
-        return renderTemplate(content, variables);
+        return renderTemplate(content, variables, depth + 1);
       }
       return "";
     }
@@ -723,7 +735,15 @@ function createEmailManager(config) {
   async function loadFile(filePath) {
     const cached = fileCache.get(filePath);
     if (cached) return cached;
-    const content = await fs.promises.readFile(path.resolve(filePath), "utf-8");
+    const resolved = path.resolve(filePath);
+    const templateDir = config.templateDir;
+    if (templateDir) {
+      const resolvedDir = path.resolve(templateDir);
+      if (!resolved.startsWith(resolvedDir + path.sep) && resolved !== resolvedDir) {
+        throw new Error(`Template path "${filePath}" is outside the allowed template directory`);
+      }
+    }
+    const content = await fs.promises.readFile(resolved, "utf-8");
     fileCache.set(filePath, content);
     return content;
   }

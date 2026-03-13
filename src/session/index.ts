@@ -45,6 +45,18 @@ export function createSessionManager(config: LockVaultConfig, hooks: Partial<Loc
       if (!session) throw new SessionError('Session not found', AuthErrorCode.SESSION_NOT_FOUND);
       if (session.isRevoked) throw new SessionError('Session has been revoked', AuthErrorCode.SESSION_REVOKED);
       if (session.expiresAt < new Date()) throw new SessionError('Session has expired', AuthErrorCode.SESSION_EXPIRED);
+
+      // Absolute timeout — max session lifetime regardless of activity (OWASP recommendation)
+      const absoluteTimeout = config.session?.absoluteTimeout;
+      if (absoluteTimeout) {
+        const ageMs = Date.now() - session.createdAt.getTime();
+        if (ageMs > absoluteTimeout * 1000) {
+          await adapter.updateSession(sessionId, { isRevoked: true });
+          throw new SessionError('Session exceeded maximum lifetime', AuthErrorCode.SESSION_EXPIRED);
+        }
+      }
+
+      // Inactivity timeout
       const inactivityTimeout = config.session?.inactivityTimeout;
       if (inactivityTimeout) {
         const inactiveMs = Date.now() - session.lastActiveAt.getTime();
@@ -56,7 +68,12 @@ export function createSessionManager(config: LockVaultConfig, hooks: Partial<Loc
       return session;
     },
 
-    async touchSession(sessionId) { return adapter.updateSession(sessionId, { lastActiveAt: new Date() }); },
+    async touchSession(sessionId) {
+      // Only touch active sessions — don't resurrect revoked or expired ones
+      const session = await adapter.getSession(sessionId);
+      if (!session || session.isRevoked || session.expiresAt < new Date()) return null;
+      return adapter.updateSession(sessionId, { lastActiveAt: new Date() });
+    },
     async getUserSessions(userId) {
       const sessions = await adapter.getSessionsByUser(userId);
       return sessions.filter(s => !s.isRevoked && s.expiresAt > new Date());

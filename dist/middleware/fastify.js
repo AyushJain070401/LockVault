@@ -49,7 +49,7 @@ var lockVaultPlugin = (fastify, opts, done) => {
     const token = extract(req);
     if (!token) {
       reply.code(401).send({ error: "Authentication required" });
-      return;
+      throw new Error("Authentication required");
     }
     try {
       const payload = await jwtManager.verifyAccessToken(token);
@@ -61,10 +61,11 @@ var lockVaultPlugin = (fastify, opts, done) => {
       }
     } catch (error) {
       if (error instanceof LockVaultError) {
-        reply.code(error.statusCode).send({ error: error.message, code: error.code });
-        return;
+        reply.code(error.statusCode).send({ error: "Authentication failed", code: error.code });
+      } else {
+        reply.code(401).send({ error: "Authentication failed" });
       }
-      reply.code(401).send({ error: "Authentication failed" });
+      throw error;
     }
   });
   done();
@@ -75,12 +76,13 @@ function fastifyAuthorize(...roles) {
     const reply = rawReply;
     if (!req.lockvault?.user) {
       reply.code(401).send({ error: "Authentication required" });
-      return;
+      throw new Error("Authentication required");
     }
     const userRoles = req.lockvault.user.roles ?? [];
     const hasRole = roles.some((role) => userRoles.includes(role));
     if (!hasRole) {
       reply.code(403).send({ error: "Insufficient permissions" });
+      throw new Error("Insufficient permissions");
     }
   };
 }

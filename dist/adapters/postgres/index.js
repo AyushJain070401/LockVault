@@ -16,6 +16,20 @@ function mapSession(row) {
     metadata: row.metadata
   };
 }
+async function withTransaction(pool, fn) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
 function createPostgresAdapter(pool, options = {}) {
   const prefix = options.tablePrefix ?? "lockvault_";
   if (!SAFE_IDENTIFIER.test(prefix)) {
@@ -209,32 +223,22 @@ function createPostgresAdapter(pool, options = {}) {
       return rows[0]?.secret ?? null;
     },
     async removeTOTPSecret(userId) {
-      await pool.query("BEGIN");
-      try {
-        await pool.query(`DELETE FROM ${t("totp_secrets")} WHERE user_id = $1`, [userId]);
-        await pool.query(`DELETE FROM ${t("backup_codes")} WHERE user_id = $1`, [userId]);
-        await pool.query("COMMIT");
-      } catch (err) {
-        await pool.query("ROLLBACK");
-        throw err;
-      }
+      await withTransaction(pool, async (client) => {
+        await client.query(`DELETE FROM ${t("totp_secrets")} WHERE user_id = $1`, [userId]);
+        await client.query(`DELETE FROM ${t("backup_codes")} WHERE user_id = $1`, [userId]);
+      });
     },
     async storeBackupCodes(userId, codes) {
-      await pool.query("BEGIN");
-      try {
-        await pool.query(`DELETE FROM ${t("backup_codes")} WHERE user_id = $1`, [userId]);
+      await withTransaction(pool, async (client) => {
+        await client.query(`DELETE FROM ${t("backup_codes")} WHERE user_id = $1`, [userId]);
         if (codes.length > 0) {
           const placeholders = codes.map((_, i) => `($1, $${i + 2})`).join(", ");
-          await pool.query(
+          await client.query(
             `INSERT INTO ${t("backup_codes")} (user_id, code) VALUES ${placeholders}`,
             [userId, ...codes]
           );
         }
-        await pool.query("COMMIT");
-      } catch (err) {
-        await pool.query("ROLLBACK");
-        throw err;
-      }
+      });
     },
     async getBackupCodes(userId) {
       const { rows } = await pool.query(`SELECT code FROM ${t("backup_codes")} WHERE user_id = $1`, [userId]);

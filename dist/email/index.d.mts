@@ -1,4 +1,4 @@
-import { T as TemplateDefinition, h as SendEmailOptions, b as EmailResult, g as SendCustomTemplateOptions, i as SendNamedTemplateOptions, l as TemplateVars, j as SendTemplateEmailOptions, L as LoginEmailVars, F as ForgotPasswordEmailVars, A as AlertEmailVars, f as SendBulkOptions, B as BulkEmailResult, E as EmailConfig } from '../types-1dgdkzJw.mjs';
+import { T as TemplateDefinition, h as SendEmailOptions, b as EmailResult, g as SendCustomTemplateOptions, i as SendNamedTemplateOptions, l as TemplateVars, j as SendTemplateEmailOptions, L as LoginEmailVars, F as ForgotPasswordEmailVars, A as AlertEmailVars, f as SendBulkOptions, B as BulkEmailResult, E as EmailConfig } from '../types-DBHV5yQn.mjs';
 
 /**
  * Register a template for a category + theme.
@@ -92,7 +92,7 @@ declare function hasNamedTemplate(name: string): boolean;
  * Users can bypass this engine entirely by providing a customRenderer
  * in their EmailConfig (for Handlebars, EJS, MJML, etc.).
  */
-declare function renderTemplate(template: string, variables: Record<string, unknown>): string;
+declare function renderTemplate(template: string, variables: Record<string, unknown>, depth?: number): string;
 /**
  * Strip HTML tags to produce a plain-text version of the email.
  */

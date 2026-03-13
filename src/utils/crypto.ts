@@ -1,6 +1,9 @@
-import { createHmac, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual, scrypt } from 'node:crypto';
+import { createHmac, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual, scrypt, createHash } from 'node:crypto';
 import { LockVaultError, ConfigurationError } from './errors.js';
 import { AuthErrorCode } from '../types/index.js';
+
+// Per-process random key for safeCompare — prevents offline precomputation
+const PROCESS_COMPARE_KEY = randomBytes(32).toString('hex');
 
 /**
  * Generate a cryptographically secure random string
@@ -36,21 +39,21 @@ export function hmacSign(data: string, secret: string): string {
 /**
  * Constant-time comparison of two strings.
  *
- * Uses HMAC comparison to ensure the execution time is independent of
- * both the content AND the length of the inputs. This prevents timing
- * side-channels that could leak information about expected values.
+ * Uses HMAC comparison with a per-process random key to ensure the execution
+ * time is independent of both the content AND the length of the inputs.
+ * This prevents timing side-channels that could leak information about
+ * expected values, and the random key prevents offline precomputation attacks.
  */
 export function safeCompare(a: string, b: string): boolean {
-  // HMAC both inputs with a fixed key — this produces fixed-length
-  // digests regardless of input length, eliminating length leakage.
-  const key = 'lockvault-safe-compare';
-  const hmacA = createHmac('sha256', key).update(a).digest();
-  const hmacB = createHmac('sha256', key).update(b).digest();
-  return timingSafeEqual(hmacA, hmacB) && a.length === b.length;
+  const hmacA = createHmac('sha256', PROCESS_COMPARE_KEY).update(a).digest();
+  const hmacB = createHmac('sha256', PROCESS_COMPARE_KEY).update(b).digest();
+  const hmacEqual = timingSafeEqual(hmacA, hmacB);
+  const lengthEqual = a.length === b.length;
+  return hmacEqual && lengthEqual;
 }
 
 /**
- * AES-256-GCM encryption
+ * AES-256-GCM encryption with versioned format for future-proofing.
  */
 export function encrypt(plaintext: string, keyHex: string): string {
   if (keyHex.length !== 64) {
@@ -61,11 +64,13 @@ export function encrypt(plaintext: string, keyHex: string): string {
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const authTag = cipher.getAuthTag();
-  return Buffer.concat([iv, authTag, encrypted]).toString('base64url');
+  // Versioned format: version(1) + iv(12) + authTag(16) + ciphertext
+  const version = Buffer.from([0x01]);
+  return Buffer.concat([version, iv, authTag, encrypted]).toString('base64url');
 }
 
 /**
- * AES-256-GCM decryption
+ * AES-256-GCM decryption — supports both v1 (versioned) and legacy formats.
  */
 export function decrypt(ciphertext: string, keyHex: string): string {
   if (keyHex.length !== 64) {
@@ -74,9 +79,20 @@ export function decrypt(ciphertext: string, keyHex: string): string {
   try {
     const key = Buffer.from(keyHex, 'hex');
     const data = Buffer.from(ciphertext, 'base64url');
-    const iv = data.subarray(0, 12);
-    const authTag = data.subarray(12, 28);
-    const encrypted = data.subarray(28);
+
+    let iv: Buffer, authTag: Buffer, encrypted: Buffer;
+    if (data[0] === 0x01 && data.length > 29) {
+      // Versioned format
+      iv = data.subarray(1, 13);
+      authTag = data.subarray(13, 29);
+      encrypted = data.subarray(29);
+    } else {
+      // Legacy format
+      iv = data.subarray(0, 12);
+      authTag = data.subarray(12, 28);
+      encrypted = data.subarray(28);
+    }
+
     const decipher = createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(authTag);
     return decipher.update(encrypted) + decipher.final('utf8');
@@ -86,27 +102,55 @@ export function decrypt(ciphertext: string, keyHex: string): string {
 }
 
 /**
- * Hash a password using scrypt
+ * Hash a password using scrypt with hardened parameters.
+ *
+ * Output format: `scrypt:N:r:p:salt:derivedKey`
+ * Embedding the parameters allows future cost upgrades without
+ * breaking existing hashes.
  */
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString('hex');
+export async function hashPassword(password: string, options?: { N?: number; r?: number; p?: number }): Promise<string> {
+  const N = options?.N ?? 32768;
+  const r = options?.r ?? 8;
+  const p = options?.p ?? 2;
+  const salt = randomBytes(32).toString('hex');
   const derived = await new Promise<Buffer>((resolve, reject) => {
-    scrypt(password, salt, 64, { N: 16384, r: 8, p: 1 }, (err, key) => {
+    scrypt(password, salt, 64, { N, r, p, maxmem: N * r * 256 }, (err, key) => {
       if (err) reject(err);
       else resolve(key);
     });
   });
-  return `${salt}:${derived.toString('hex')}`;
+  return `scrypt:${N}:${r}:${p}:${salt}:${derived.toString('hex')}`;
 }
 
 /**
- * Verify a password against its hash
+ * Verify a password against its hash.
+ * Supports both new format (scrypt:N:r:p:salt:key) and legacy (salt:key).
  */
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const [salt, key] = hash.split(':');
+  let salt: string, key: string, N: number, r: number, p: number;
+
+  if (hash.startsWith('scrypt:')) {
+    const parts = hash.split(':');
+    if (parts.length !== 6) return false;
+    N = parseInt(parts[1]!, 10);
+    r = parseInt(parts[2]!, 10);
+    p = parseInt(parts[3]!, 10);
+    salt = parts[4]!;
+    key = parts[5]!;
+    if (isNaN(N) || isNaN(r) || isNaN(p)) return false;
+  } else {
+    // Legacy format
+    const parts = hash.split(':');
+    if (parts.length !== 2) return false;
+    salt = parts[0]!;
+    key = parts[1]!;
+    N = 16384; r = 8; p = 1;
+  }
+
   if (!salt || !key) return false;
+
   const derived = await new Promise<Buffer>((resolve, reject) => {
-    scrypt(password, salt, 64, { N: 16384, r: 8, p: 1 }, (err, derivedKey) => {
+    scrypt(password, salt, 64, { N, r, p, maxmem: N * r * 256 }, (err, derivedKey) => {
       if (err) reject(err);
       else resolve(derivedKey);
     });
@@ -168,4 +212,65 @@ export function base32Decode(encoded: string): Buffer {
     }
   }
   return Buffer.from(bytes);
+}
+
+// ─── New Security Utilities ──────────────────────────────────────────────
+
+/**
+ * Generate a token fingerprint from client context (IP + User-Agent).
+ * Binds tokens to the client that created them, mitigating token theft.
+ * Uses a one-way hash so the fingerprint can't be reversed.
+ */
+export function generateTokenFingerprint(ipAddress?: string, userAgent?: string): string {
+  const data = `${ipAddress ?? 'unknown'}|${userAgent ?? 'unknown'}`;
+  return createHash('sha256').update(data).digest('base64url').slice(0, 16);
+}
+
+/**
+ * Validate and sanitize an IP address.
+ * Returns the sanitized IP or undefined if invalid.
+ */
+export function sanitizeIpAddress(ip: string | undefined): string | undefined {
+  if (!ip || typeof ip !== 'string') return undefined;
+
+  // Take first IP from comma-separated list (X-Forwarded-For)
+  const cleaned = ip.trim().split(',')[0]?.trim();
+  if (!cleaned || cleaned.length > 45) return undefined; // Max IPv6 length
+
+  // IPv4
+  const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+  const v4Match = cleaned.match(ipv4Regex);
+  if (v4Match) {
+    const valid = [v4Match[1], v4Match[2], v4Match[3], v4Match[4]]
+      .every(o => parseInt(o!, 10) <= 255);
+    return valid ? cleaned : undefined;
+  }
+
+  // IPv6 (simplified validation)
+  const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+  if (ipv6Regex.test(cleaned)) return cleaned;
+
+  // IPv4-mapped IPv6
+  const mappedRegex = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i;
+  const mappedMatch = cleaned.match(mappedRegex);
+  if (mappedMatch) return mappedMatch[1];
+
+  return undefined;
+}
+
+/**
+ * Generate a PKCE code verifier and challenge pair for OAuth.
+ * @see https://datatracker.ietf.org/doc/html/rfc7636
+ */
+export function generatePKCE(): { codeVerifier: string; codeChallenge: string; codeChallengeMethod: 'S256' } {
+  const codeVerifier = randomBytes(32).toString('base64url');
+  const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+  return { codeVerifier, codeChallenge, codeChallengeMethod: 'S256' };
+}
+
+/**
+ * Generate a CSRF token.
+ */
+export function generateCSRFToken(): string {
+  return randomBytes(32).toString('base64url');
 }

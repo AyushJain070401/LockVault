@@ -20,6 +20,7 @@ interface FastifyRequest {
 interface FastifyReply {
   code(statusCode: number): FastifyReply;
   send(payload?: unknown): FastifyReply;
+  sent: boolean;
   setCookie(name: string, value: string, options?: Record<string, unknown>): FastifyReply;
   clearCookie(name: string, options?: Record<string, unknown>): FastifyReply;
 }
@@ -81,7 +82,8 @@ export const lockVaultPlugin: FastifyPluginCallback = (fastify, opts, done) => {
     const token = extract(req);
     if (!token) {
       reply.code(401).send({ error: 'Authentication required' });
-      return;
+      // Throw to prevent Fastify from continuing to route handler
+      throw new Error('Authentication required');
     }
 
     try {
@@ -95,10 +97,12 @@ export const lockVaultPlugin: FastifyPluginCallback = (fastify, opts, done) => {
       }
     } catch (error) {
       if (error instanceof LockVaultError) {
-        reply.code(error.statusCode).send({ error: error.message, code: error.code });
-        return;
+        reply.code(error.statusCode).send({ error: 'Authentication failed', code: error.code });
+      } else {
+        reply.code(401).send({ error: 'Authentication failed' });
       }
-      reply.code(401).send({ error: 'Authentication failed' });
+      // Throw to halt request processing in Fastify
+      throw error;
     }
   });
 
@@ -115,7 +119,7 @@ export function fastifyAuthorize(...roles: string[]) {
 
     if (!req.lockvault?.user) {
       reply.code(401).send({ error: 'Authentication required' });
-      return;
+      throw new Error('Authentication required');
     }
 
     const userRoles = (req.lockvault.user.roles ?? []) as string[];
@@ -123,6 +127,7 @@ export function fastifyAuthorize(...roles: string[]) {
 
     if (!hasRole) {
       reply.code(403).send({ error: 'Insufficient permissions' });
+      throw new Error('Insufficient permissions');
     }
   };
 }
