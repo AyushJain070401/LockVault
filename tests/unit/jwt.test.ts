@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createJWTManager } from '../../src/jwt/index.js';
+import type { JWTManager } from '../../src/jwt/index.js';
 import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
 import { TokenExpiredError, TokenInvalidError, TokenRevokedError, RefreshTokenReuseError } from '../../src/utils/errors.js';
 import type { LockVaultConfig } from '../../src/types/index.js';

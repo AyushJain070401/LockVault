@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createSessionManager } from '../../src/session/index.js';
+import type { SessionManager } from '../../src/session/index.js';
 import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
 import { SessionError } from '../../src/utils/errors.js';
 import type { LockVaultConfig } from '../../src/types/index.js';
@@ -135,7 +136,7 @@ describe('SessionManager', () => {
 
   describe('cleanup', () => {
     it('should remove expired sessions', async () => {
-      const adapter = config.adapter as createMemoryAdapter;
+      const adapter = config.adapter;
       // Create a session that's already expired
       await adapter.createSession({
         id: 'expired-1',

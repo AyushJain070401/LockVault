@@ -15,12 +15,14 @@ export interface TOTPManager {
   getBackupCodesCount(userId: string): Promise<number>;
   regenerateBackupCodes(userId: string): Promise<string[]>;
   generateCode(secret: string, time?: number): string;
+  destroy(): void;
 }
 
 export function createTOTPManager(cfg: Partial<TOTPConfig> = {}, adapter: DatabaseAdapter, kvStore?: KeyValueStore): TOTPManager {
   const c: Required<TOTPConfig> = { ...DEFAULT_TOTP_CONFIG, ...cfg };
   const rateLimiter = createRateLimiter({ windowMs: 60_000, maxAttempts: 5 });
-  const replayStore: KeyValueStore = kvStore ?? createMemoryKeyValueStore({ maxEntries: 50_000 });
+  const ownsReplayStore = !kvStore;
+  const replayStore: KeyValueStore & { destroy?(): void } = kvStore ?? createMemoryKeyValueStore({ maxEntries: 50_000 });
 
   function generateSecret(bytes = 20): string { return base32Encode(randomBytes(bytes)); }
 
@@ -78,7 +80,7 @@ export function createTOTPManager(cfg: Partial<TOTPConfig> = {}, adapter: Databa
         const codeKey = `totp_used:${userId}:${code}`;
         const alreadyUsed = await replayStore.get(codeKey);
         if (alreadyUsed) throw new TOTPError('TOTP code already used', AuthErrorCode.TOTP_INVALID);
-        await replayStore.set(codeKey, '1', c.period * 2 * 1000);
+        await replayStore.set(codeKey, '1', c.period * (c.window * 2 + 1) * 1000);
         rateLimiter.reset(`totp:${userId}`);
         return true;
       }
@@ -103,6 +105,10 @@ export function createTOTPManager(cfg: Partial<TOTPConfig> = {}, adapter: Databa
       const now = time ?? Math.floor(Date.now() / 1000);
       const counter = Math.floor(now / c.period);
       return hotpGenerate(secret, counter);
+    },
+    destroy() {
+      rateLimiter.destroy();
+      if (ownsReplayStore && replayStore.destroy) replayStore.destroy();
     },
   };
 }

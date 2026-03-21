@@ -100,7 +100,7 @@ describe('EdDSA (Ed25519) JWT', () => {
 // ─── MemoryKeyValueStore Tests ───────────────────────────────────────────
 
 describe('MemoryKeyValueStore', () => {
-  let store: MemoryKeyValueStore;
+  let store: ReturnType<typeof createMemoryKeyValueStore>;
 
   afterEach(() => {
     store?.destroy();

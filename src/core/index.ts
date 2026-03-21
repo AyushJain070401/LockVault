@@ -3,7 +3,7 @@ import { createJWTManager, JWTManager } from '../jwt/index.js';
 import { createSessionManager, SessionManager } from '../session/index.js';
 import { createTOTPManager, TOTPManager } from '../totp/index.js';
 import { createOAuthManager, OAuthManager } from '../oauth/index.js';
-import { ConfigurationError } from '../utils/errors.js';
+import { ConfigurationError, LockVaultError } from '../utils/errors.js';
 import { generateId } from '../utils/crypto.js';
 
 export interface LockVault {
@@ -84,15 +84,24 @@ export function createLockVault(config: LockVaultConfig): LockVault {
     stopCleanup() { if (cleanupInterval) { clearInterval(cleanupInterval); cleanupInterval = undefined; } },
 
     async login(userId, options = {}) {
-      const session = await sessions.createSession(userId, generateId(16), { deviceInfo: options.deviceInfo, ipAddress: options.ipAddress, metadata: options.metadata });
-      const tokens = await jwt.createTokenPair(userId, { ...options.customClaims, sid: session.id }, session.id);
+      const family = generateId(16);
+      const session = await sessions.createSession(userId, family, { deviceInfo: options.deviceInfo, ipAddress: options.ipAddress, metadata: options.metadata });
+      const tokens = await jwt.createTokenPair(userId, { ...options.customClaims, sid: session.id }, session.id, family);
       return { tokens, session };
     },
 
     async refresh(refreshToken, customClaims?) { return jwt.refreshTokens(refreshToken, customClaims); },
 
     async logout(accessToken) {
-      try { const payload = await jwt.verifyAccessToken(accessToken); await jwt.revokeToken(accessToken); if (payload.sid) await sessions.revokeSession(payload.sid as string); } catch {}
+      try {
+        const payload = await jwt.verifyAccessToken(accessToken);
+        await jwt.revokeToken(accessToken);
+        if (payload.sid) await sessions.revokeSession(payload.sid as string);
+      } catch (err) {
+        // Ignore expected auth errors (expired/revoked tokens) — logout should be idempotent
+        if (err instanceof LockVaultError) return;
+        throw err;
+      }
     },
 
     async logoutAll(userId) { return sessions.revokeAllSessions(userId); },
@@ -106,6 +115,6 @@ export function createLockVault(config: LockVaultConfig): LockVault {
     async handleOAuthCallback(provider, code, state) { return oauth.handleCallback(provider, code, state); },
     rotateJWTKeys(newSecret) { jwt.rotateKeys(newSecret); },
 
-    async close() { this.stopCleanup(); oauth.destroy(); if (adapter.close) await adapter.close(); },
+    async close() { this.stopCleanup(); totp.destroy(); oauth.destroy(); if (adapter.close) await adapter.close(); },
   };
 }

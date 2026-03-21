@@ -95,7 +95,8 @@ export function decrypt(ciphertext: string, keyHex: string): string {
 
     const decipher = createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(authTag);
-    return decipher.update(encrypted) + decipher.final('utf8');
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    return decrypted.toString('utf8');
   } catch {
     throw new LockVaultError('Failed to decrypt token', AuthErrorCode.ENCRYPTION_ERROR, 401);
   }
@@ -246,8 +247,8 @@ export function sanitizeIpAddress(ip: string | undefined): string | undefined {
     return valid ? cleaned : undefined;
   }
 
-  // IPv6 (simplified validation)
-  const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+  // IPv6 (simplified validation — accepts standard, compressed, and loopback forms)
+  const ipv6Regex = /^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$|^::([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{0,4}$|^::$/;
   if (ipv6Regex.test(cleaned)) return cleaned;
 
   // IPv4-mapped IPv6

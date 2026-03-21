@@ -166,7 +166,8 @@ function decrypt(ciphertext, keyHex) {
     }
     const decipher = createDecipheriv("aes-256-gcm", key, iv);
     decipher.setAuthTag(authTag);
-    return decipher.update(encrypted) + decipher.final("utf8");
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    return decrypted.toString("utf8");
   } catch {
     throw new LockVaultError("Failed to decrypt token", "ENCRYPTION_ERROR" /* ENCRYPTION_ERROR */, 401);
   }
@@ -270,7 +271,7 @@ function sanitizeIpAddress(ip) {
     const valid = [v4Match[1], v4Match[2], v4Match[3], v4Match[4]].every((o) => parseInt(o, 10) <= 255);
     return valid ? cleaned : void 0;
   }
-  const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+  const ipv6Regex = /^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$|^::([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{0,4}$|^::$/;
   if (ipv6Regex.test(cleaned)) return cleaned;
   const mappedRegex = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i;
   const mappedMatch = cleaned.match(mappedRegex);
@@ -417,7 +418,12 @@ function createJWTManager(config, hooks = {}) {
     if (!verifySignature(algorithm, signingInput, signature, secret, header.kid)) {
       throw new TokenInvalidError("Invalid signature");
     }
-    const payload = JSON.parse(base64UrlDecode(payloadB64));
+    let payload;
+    try {
+      payload = JSON.parse(base64UrlDecode(payloadB64));
+    } catch {
+      throw new TokenInvalidError("Malformed token payload");
+    }
     const now = Math.floor(Date.now() / 1e3);
     if (payload.exp && payload.exp < now) throw new TokenExpiredError();
     if (payload.nbf && payload.nbf > now) throw new TokenInvalidError("Token is not yet valid");
@@ -431,7 +437,7 @@ function createJWTManager(config, hooks = {}) {
     return payload;
   }
   return {
-    async createTokenPair(userId, customClaims = {}, sessionId) {
+    async createTokenPair(userId, customClaims = {}, sessionId, familyId) {
       const now = Math.floor(Date.now() / 1e3);
       const jwtConfig = config.jwt;
       const accessTTL = jwtConfig.accessTokenTTL ?? 900;
@@ -440,7 +446,7 @@ function createJWTManager(config, hooks = {}) {
       if (hooks.beforeTokenCreate) claims = await hooks.beforeTokenCreate(claims);
       const accessJti = generateUUID();
       const refreshJti = generateUUID();
-      const family = generateUUID();
+      const family = familyId ?? generateUUID();
       const accessPayload = {
         sub: userId,
         iat: now,
@@ -808,6 +814,7 @@ var DEFAULT_TOTP_CONFIG = { issuer: "LockVault", algorithm: "SHA1", digits: 6, p
 function createTOTPManager(cfg = {}, adapter, kvStore) {
   const c = { ...DEFAULT_TOTP_CONFIG, ...cfg };
   const rateLimiter = createRateLimiter({ windowMs: 6e4, maxAttempts: 5 });
+  const ownsReplayStore = !kvStore;
   const replayStore = kvStore ?? createMemoryKeyValueStore({ maxEntries: 5e4 });
   function generateSecret(bytes = 20) {
     return base32Encode(randomBytes(bytes));
@@ -863,7 +870,7 @@ function createTOTPManager(cfg = {}, adapter, kvStore) {
         const codeKey = `totp_used:${userId}:${code}`;
         const alreadyUsed = await replayStore.get(codeKey);
         if (alreadyUsed) throw new TOTPError("TOTP code already used", "TOTP_INVALID" /* TOTP_INVALID */);
-        await replayStore.set(codeKey, "1", c.period * 2 * 1e3);
+        await replayStore.set(codeKey, "1", c.period * (c.window * 2 + 1) * 1e3);
         rateLimiter.reset(`totp:${userId}`);
         return true;
       }
@@ -893,6 +900,10 @@ function createTOTPManager(cfg = {}, adapter, kvStore) {
       const now = time ?? Math.floor(Date.now() / 1e3);
       const counter = Math.floor(now / c.period);
       return hotpGenerate(secret, counter);
+    },
+    destroy() {
+      rateLimiter.destroy();
+      if (ownsReplayStore && replayStore.destroy) replayStore.destroy();
     }
   };
 }
@@ -1088,8 +1099,9 @@ function createLockVault(config) {
       }
     },
     async login(userId, options = {}) {
-      const session = await sessions.createSession(userId, generateId(16), { deviceInfo: options.deviceInfo, ipAddress: options.ipAddress, metadata: options.metadata });
-      const tokens = await jwt.createTokenPair(userId, { ...options.customClaims, sid: session.id }, session.id);
+      const family = generateId(16);
+      const session = await sessions.createSession(userId, family, { deviceInfo: options.deviceInfo, ipAddress: options.ipAddress, metadata: options.metadata });
+      const tokens = await jwt.createTokenPair(userId, { ...options.customClaims, sid: session.id }, session.id, family);
       return { tokens, session };
     },
     async refresh(refreshToken, customClaims) {
@@ -1100,7 +1112,9 @@ function createLockVault(config) {
         const payload = await jwt.verifyAccessToken(accessToken);
         await jwt.revokeToken(accessToken);
         if (payload.sid) await sessions.revokeSession(payload.sid);
-      } catch {
+      } catch (err) {
+        if (err instanceof LockVaultError) return;
+        throw err;
       }
     },
     async logoutAll(userId) {
@@ -1135,6 +1149,7 @@ function createLockVault(config) {
     },
     async close() {
       this.stopCleanup();
+      totp.destroy();
       oauth.destroy();
       if (adapter.close) await adapter.close();
     }

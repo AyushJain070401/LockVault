@@ -19,7 +19,7 @@ function deriveKid(secret: string): string {
 }
 
 export interface JWTManager {
-  createTokenPair(userId: string, customClaims?: Record<string, unknown>, sessionId?: string): Promise<TokenPair>;
+  createTokenPair(userId: string, customClaims?: Record<string, unknown>, sessionId?: string, familyId?: string): Promise<TokenPair>;
   verifyAccessToken(token: string): Promise<AccessTokenPayload>;
   verifyRefreshToken(token: string): Promise<RefreshTokenPayload>;
   refreshTokens(refreshToken: string, customClaims?: Record<string, unknown>): Promise<TokenPair>;
@@ -113,7 +113,8 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
       throw new TokenInvalidError('Invalid signature');
     }
 
-    const payload = JSON.parse(base64UrlDecode(payloadB64)) as TokenPayload;
+    let payload: TokenPayload;
+    try { payload = JSON.parse(base64UrlDecode(payloadB64)) as TokenPayload; } catch { throw new TokenInvalidError('Malformed token payload'); }
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp && payload.exp < now) throw new TokenExpiredError();
     if (payload.nbf && payload.nbf > now) throw new TokenInvalidError('Token is not yet valid');
@@ -131,7 +132,7 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
   // ── Public API ──────────────────────────────────────────────────────────
 
   return {
-    async createTokenPair(userId, customClaims = {}, sessionId?) {
+    async createTokenPair(userId, customClaims = {}, sessionId?, familyId?) {
       const now = Math.floor(Date.now() / 1000);
       const jwtConfig = config.jwt;
       const accessTTL = jwtConfig.accessTokenTTL ?? 900;
@@ -139,7 +140,7 @@ export function createJWTManager(config: LockVaultConfig, hooks: Partial<LockVau
       let claims = { ...customClaims };
       if (hooks.beforeTokenCreate) claims = await hooks.beforeTokenCreate(claims);
 
-      const accessJti = generateUUID(); const refreshJti = generateUUID(); const family = generateUUID();
+      const accessJti = generateUUID(); const refreshJti = generateUUID(); const family = familyId ?? generateUUID();
       const accessPayload: AccessTokenPayload = {
         sub: userId, iat: now, nbf: now, exp: now + accessTTL, jti: accessJti, type: 'access',
         ...(jwtConfig.issuer ? { iss: jwtConfig.issuer } : {}),

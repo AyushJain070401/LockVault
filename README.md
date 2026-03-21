@@ -1,14 +1,46 @@
 # LockVault
 
-Authentication toolkit for Node.js. One package for JWT tokens, sessions, two-factor auth, OAuth logins, and database storage — with zero runtime dependencies.
+[![CI](https://github.com/AyushJain070401/LockVault/actions/workflows/ci.yml/badge.svg)](https://github.com/AyushJain070401/LockVault/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/lockvault)](https://www.npmjs.com/package/lockvault)
+[![Node](https://img.shields.io/node/v/lockvault)](https://www.npmjs.com/package/lockvault)
+[![License](https://img.shields.io/npm/l/lockvault)](./LICENSE)
+[![Zero Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)]()
+
+**Production-grade authentication for Node.js.** JWT tokens, sessions, TOTP/2FA, OAuth, email — one package, zero runtime dependencies, safe defaults.
 
 ```
 npm install lockvault
 ```
 
-## Why LockVault?
+### What you get
 
-Most auth setups need you to wire together 5+ packages (jsonwebtoken, express-session, speakeasy, passport, etc.) and get the security details right yourself. LockVault gives you all of it in one import, with safe defaults already configured.
+- **JWT** — HS256, RS256, ES256, ES384, ES512, EdDSA. Refresh token rotation with reuse detection. Key rotation with grace period. Optional AES-256-GCM encryption.
+- **Sessions** — Multi-device tracking, inactivity + absolute timeouts, automatic cleanup.
+- **TOTP/2FA** — Google Authenticator compatible. Rate-limited verification, replay protection, backup codes.
+- **OAuth** — Google, GitHub, Facebook, Apple, Microsoft. PKCE built in. Bring your own providers.
+- **Email** — SMTP with themed templates (login alerts, password reset, etc.). Pluggable engines (Handlebars, EJS, MJML).
+- **Database adapters** — Memory (dev), PostgreSQL, MongoDB, Redis. Or write your own with a single interface.
+- **Middleware** — Express and Fastify out of the box. CSRF protection, security headers, cookie helpers.
+- **Plugin system** — Lifecycle hooks for logging, auditing, custom claims injection.
+
+### How it compares
+
+| | LockVault | jsonwebtoken + express-session + speakeasy + passport | Better Auth | Auth.js |
+|---|---|---|---|---|
+| Runtime deps | **0** | 15+ | 5+ | 10+ |
+| JWT + Sessions + TOTP + OAuth | **All in one** | Manual wiring | Yes | Partial |
+| Database adapters | Postgres, MongoDB, Redis, Memory | DIY | ORM-based | ORM-based |
+| Framework lock-in | None (Express/Fastify optional) | Express | None | Next.js / SvelteKit |
+| Zero-config security defaults | ✓ | ✗ | ✓ | ✓ |
+| Custom JWT algorithms (EdDSA, ES512) | ✓ | Limited | ✗ | ✗ |
+
+```
+npm install lockvault
+```
+
+## Quick Start
+
+Most auth setups need you to wire together 5+ packages and get the security details right yourself. LockVault gives you all of it in one import, with safe defaults already configured.
 
 ```typescript
 import { createLockVault, createMemoryAdapter } from 'lockvault';

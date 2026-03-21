@@ -1,5 +1,5 @@
 import { o as TokenPayload, S as Session, C as CookieOptions } from '../index-BR3ae_bk.js';
-import { J as JWTManager, S as SessionManager } from '../index-DHVNaTEZ.js';
+import { J as JWTManager, S as SessionManager } from '../index-BxZvBPS6.js';
 
 interface FastifyRequest {
     headers: Record<string, string | string[] | undefined>;

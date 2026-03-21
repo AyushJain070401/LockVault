@@ -2,10 +2,11 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createTOTPManager } from '../../src/totp/index.js';
 import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
 import { TOTPError } from '../../src/utils/errors.js';
+import type { DatabaseAdapter } from '../../src/types/index.js';
 
 describe('TOTPManager', () => {
-  let totp: TOTPManager;
-  let adapter: createMemoryAdapter;
+  let totp: ReturnType<typeof createTOTPManager>;
+  let adapter: DatabaseAdapter;
 
   beforeEach(() => {
     adapter = createMemoryAdapter();

@@ -1,6 +1,6 @@
 {
   "name": "lockvault",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Production-grade authentication toolkit for Node.js — JWT, sessions, TOTP/2FA, OAuth, multi-database support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -54,6 +54,7 @@
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -73,7 +74,9 @@
     "session",
     "totp",
     "2fa",
+    "mfa",
     "oauth",
+    "oauth2",
     "express",
     "fastify",
     "nestjs",
@@ -86,7 +89,15 @@
     "email",
     "smtp",
     "nodemailer",
-    "email-templates"
+    "email-templates",
+    "password-hashing",
+    "scrypt",
+    "zero-dependency",
+    "eddsa",
+    "pkce",
+    "csrf",
+    "rate-limiting",
+    "google-authenticator"
   ],
   "author": "Ayush Jain",
   "license": "MIT",

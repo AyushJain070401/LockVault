@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
-import type { Session } from '../../src/types/index.js';
+import type { DatabaseAdapter, Session } from '../../src/types/index.js';
 
 describe('createMemoryAdapter', () => {
-  let adapter: createMemoryAdapter;
+  let adapter: DatabaseAdapter;
 
   beforeEach(() => {
     adapter = createMemoryAdapter();

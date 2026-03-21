@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createLockVault } from '../../src/core/index.js';
+import type { LockVault } from '../../src/core/index.js';
 import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
 import { createJWTManager } from '../../src/jwt/index.js';
 import {
@@ -8,7 +9,7 @@ import {
   RefreshTokenReuseError,
   ConfigurationError,
 } from '../../src/utils/errors.js';
-import { encrypt, decrypt, hashPassword, verifyPassword, safeCompare, generateBackupCodes } from '../../src/utils/crypto.js';
+import { encrypt, decrypt, hashPassword, verifyPassword, safeCompare, generateBackupCodes, sanitizeIpAddress } from '../../src/utils/crypto.js';
 import type { LockVaultConfig } from '../../src/types/index.js';
 
 describe('Security Edge Cases', () => {
@@ -263,6 +264,16 @@ describe('Security Edge Cases', () => {
 
       await expect(auth.jwt.verifyAccessToken(token)).rejects.toThrow('Malformed token header');
     });
+
+    it('should reject tokens with malformed payloads', async () => {
+      const { tokens } = await auth.login('user-1');
+      const parts = tokens.accessToken.split('.');
+      // Keep valid header but replace payload with non-JSON
+      parts[1] = Buffer.from('not-valid-json{{{').toString('base64url');
+      const tampered = parts.join('.');
+
+      await expect(auth.jwt.verifyAccessToken(tampered)).rejects.toThrow(/Malformed token payload|Invalid signature/);
+    });
   });
 
   describe('Issuer and Audience Validation', () => {
@@ -328,6 +339,35 @@ describe('Security Edge Cases', () => {
       } catch (err: unknown) {
         expect((err as Error).message).toMatch(/Rate limit|rate limit/i);
       }
+    });
+  });
+
+  describe('IP Address Sanitization', () => {
+    it('should accept valid IPv4', () => {
+      expect(sanitizeIpAddress('192.168.1.1')).toBe('192.168.1.1');
+    });
+
+    it('should accept IPv6 loopback', () => {
+      expect(sanitizeIpAddress('::1')).toBe('::1');
+    });
+
+    it('should accept full IPv6', () => {
+      expect(sanitizeIpAddress('2001:0db8:85a3:0000:0000:8a2e:0370:7334')).toBe('2001:0db8:85a3:0000:0000:8a2e:0370:7334');
+    });
+
+    it('should extract IPv4-mapped IPv6', () => {
+      expect(sanitizeIpAddress('::ffff:192.168.1.1')).toBe('192.168.1.1');
+    });
+
+    it('should take first IP from X-Forwarded-For', () => {
+      expect(sanitizeIpAddress('10.0.0.1, 192.168.1.1')).toBe('10.0.0.1');
+    });
+
+    it('should reject invalid input', () => {
+      expect(sanitizeIpAddress(undefined)).toBeUndefined();
+      expect(sanitizeIpAddress('')).toBeUndefined();
+      expect(sanitizeIpAddress('not-an-ip')).toBeUndefined();
+      expect(sanitizeIpAddress('999.999.999.999')).toBeUndefined();
     });
   });
 });

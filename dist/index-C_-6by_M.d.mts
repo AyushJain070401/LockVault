@@ -1,7 +1,7 @@
-import { g as TokenPair, A as AccessTokenPayload, n as RefreshTokenPayload, k as DecodedToken, L as LockVaultConfig, l as LockVaultHooks, f as DeviceInfo, S as Session } from './index-BR3ae_bk.js';
+import { g as TokenPair, A as AccessTokenPayload, n as RefreshTokenPayload, k as DecodedToken, L as LockVaultConfig, l as LockVaultHooks, f as DeviceInfo, S as Session } from './index-BR3ae_bk.mjs';
 
 interface JWTManager {
-    createTokenPair(userId: string, customClaims?: Record<string, unknown>, sessionId?: string): Promise<TokenPair>;
+    createTokenPair(userId: string, customClaims?: Record<string, unknown>, sessionId?: string, familyId?: string): Promise<TokenPair>;
     verifyAccessToken(token: string): Promise<AccessTokenPayload>;
     verifyRefreshToken(token: string): Promise<RefreshTokenPayload>;
     refreshTokens(refreshToken: string, customClaims?: Record<string, unknown>): Promise<TokenPair>;

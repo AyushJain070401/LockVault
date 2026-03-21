@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createLockVault } from '../../src/core/index.js';
+import type { LockVault } from '../../src/core/index.js';
 import { createMemoryAdapter } from '../../src/adapters/memory/index.js';
 import type { LockVaultConfig, LockVaultPlugin } from '../../src/types/index.js';
 
@@ -221,6 +222,43 @@ describe('LockVault Integration', () => {
       auth.startCleanup(1000);
       // Should not throw
       auth.stopCleanup();
+    });
+  });
+
+  describe('Session-JWT Family Linkage', () => {
+    it('should link session refreshTokenFamily to the JWT refresh token family', async () => {
+      const { tokens, session } = await auth.login('user-1');
+
+      // Decode the refresh token to get its family
+      const refreshPayload = await auth.jwt.verifyRefreshToken(tokens.refreshToken);
+
+      // The session's refreshTokenFamily should match the JWT's family
+      expect(session.refreshTokenFamily).toBe(refreshPayload.family);
+    });
+  });
+
+  describe('Logout Error Handling', () => {
+    it('should silently handle expired/revoked tokens on logout', async () => {
+      const { tokens } = await auth.login('user-1');
+      // Logout twice — second should not throw even though token is already revoked
+      await auth.logout(tokens.accessToken);
+      await expect(auth.logout(tokens.accessToken)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('TOTP Replay Protection', () => {
+    it('should reject a reused TOTP code within the same time window', async () => {
+      const setup = await auth.setupTOTP('replay-user', 'replay@test.com');
+      const code = auth.totp.generateCode(setup.secret);
+      await auth.confirmTOTP('replay-user', setup.secret, code, setup.backupCodes);
+
+      // First verify should succeed
+      const freshCode = auth.totp.generateCode(setup.secret);
+      const result = await auth.verifyTOTP('replay-user', freshCode);
+      expect(result).toBe(true);
+
+      // Replaying the exact same code should fail
+      await expect(auth.verifyTOTP('replay-user', freshCode)).rejects.toThrow(/already used|TOTP/);
     });
   });
 });

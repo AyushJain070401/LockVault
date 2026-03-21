@@ -1,7 +1,7 @@
 import { T as TOTPSetupResult, a as TOTPConfig, D as DatabaseAdapter, K as KeyValueStore, O as OAuthProviderPreset, b as OAuthProviderConfig, c as OAuthUserProfile, d as OAuthTokenResponse, e as OAuthLink, f as DeviceInfo, g as TokenPair, S as Session, L as LockVaultConfig } from './index-BR3ae_bk.js';
 export { A as AccessTokenPayload, h as Algorithm, i as AuthErrorCode, j as AuthUser, C as CookieOptions, k as DecodedToken, l as LockVaultHooks, m as LockVaultPlugin, M as MiddlewareOptions, R as RateLimitConfig, n as RefreshTokenPayload, o as TokenPayload } from './index-BR3ae_bk.js';
-import { J as JWTManager, S as SessionManager } from './index-DHVNaTEZ.js';
-export { c as createJWTManager, a as createSessionManager } from './index-DHVNaTEZ.js';
+import { J as JWTManager, S as SessionManager } from './index-BxZvBPS6.js';
+export { c as createJWTManager, a as createSessionManager } from './index-BxZvBPS6.js';
 import { L as LockVaultError } from './errors-B26T9cZh.js';
 export { C as ConfigurationError, E as EmailError, O as OAuthError, R as RefreshTokenReuseError, S as SessionError, T as TOTPError, a as TokenExpiredError, b as TokenInvalidError, c as TokenRevokedError } from './errors-B26T9cZh.js';
 export { A as AlertEmailVars, a as AlertTheme, B as BulkEmailResult, C as CustomRenderFn, E as EmailConfig, b as EmailResult, c as EmailTemplateCategory, F as ForgotPasswordEmailVars, d as ForgotPasswordTheme, L as LoginEmailVars, e as LoginTheme, M as MagicLinkEmailVars, S as SMTPConfig, f as SendBulkOptions, g as SendCustomTemplateOptions, h as SendEmailOptions, i as SendNamedTemplateOptions, j as SendTemplateEmailOptions, T as TemplateDefinition, k as TemplateSource, V as VerificationEmailVars, W as WelcomeEmailVars } from './types-DBHV5yQn.js';
@@ -14,6 +14,7 @@ interface TOTPManager {
     getBackupCodesCount(userId: string): Promise<number>;
     regenerateBackupCodes(userId: string): Promise<string[]>;
     generateCode(secret: string, time?: number): string;
+    destroy(): void;
 }
 declare function createTOTPManager(cfg: Partial<TOTPConfig> | undefined, adapter: DatabaseAdapter, kvStore?: KeyValueStore): TOTPManager;
 
